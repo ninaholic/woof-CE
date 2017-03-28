@@ -25,7 +25,6 @@
 # 27jun09 I18N, vfat mount options by Masaki Shinomiya <shino@pos.to>
 # 08jul09 ask to eject CD
 #w476 fix codepage for vfat f.s. ... neglected by Masaki Shinomiya
-#w477 fix pmount crash when running xvesa.
 #100127 codepage fixes. 100131 iso9660 fix.
 #101005 maddox: added m_40 cancel message, fixed usage of m_31.
 #110208 zigbert: improve gui layout. bk: put this on-hold for now, see 3 commented lines.
@@ -53,10 +52,10 @@ MYPID=${$}
 
 . /etc/rc.d/PUPSTATE #v3.96
 export PMOUNT="pmount" #name of this executable.
-. /etc/rc.d/functions4puppy4 #v4.02
+. /usr/local/pup_event/frontend_funcs #rox
 
 #build script to reload gui from mountme funtion
-echo 'TMP="`ps`"; for I in `echo "$TMP" | grep -F "pmount" | awk '"'"'{print $1}'"'"'`; do kill -9 $I 2> /dev/null; done; exec /usr/sbin/'"$PMOUNT $TOPACTUAL" > /tmp/pmount_reload
+echo 'TMP="`busybox ps`"; for I in `echo "$TMP" | grep -F "pmount" | awk '"'"'{print $1}'"'"'`; do kill -9 $I 2> /dev/null; done; exec /usr/sbin/'"$PMOUNT $TOPACTUAL" > /tmp/pmount_reload
 chmod 722 /tmp/pmount_reload
 #---
 
@@ -158,21 +157,7 @@ buildpix (){
 	if [ "$ONEFS" != "cdda" ]; then
 		export ONESIZEK=`echo -n "$ONEPART" | cut -f 3 -d '|'`
 		[ "$ONESIZEK" = 0 ] && ONESIZEK=1 #calculation of percent (svg) fails if size is 0 (ie. a blank CD)
-		if [ $ONESIZEK -gt 1073741824 ];then #1024*1024*1024
-			ONESIZE="`dc $ONESIZEK 1073741824 \/ p`"
-			ONESIZE="`printf "%.1f" $ONESIZE`T"
-		elif [ $ONESIZEK -gt 1048576 ];then #1024*1024
-			ONESIZE="`dc $ONESIZEK 1048576 \/ p`"
-			ONESIZE="`printf "%.1f" $ONESIZE`G"
-		else
-			if [ $ONESIZEK -gt 99 ];then
-				ONESIZE="`expr $ONESIZEK \/ 1024`M"
-			else
-				ONESIZE="`dc $ONESIZEK 1024 \/ p`"
-				ONESIZE="`printf "%.1f" $ONESIZE`M"
-			fi
-		fi
-		if [ "$ONESIZE" = "0.0M" ] || [ "$ONESIZE" = "0M" ]; then ONESIZE=""; fi
+		ONESIZE=$(filesize -bytes=1024 $ONESIZEK)
 	fi
 
 	#free space
@@ -182,21 +167,7 @@ buildpix (){
 	else 
 		export FREEK=`df -k | tr -s ' ' | grep -m1 "$DEVPATTERN" | cut -f 4 -d ' '`
 		[ ! "$FREEK" ] && FREEK=$ONESIZEK
-		if [ $FREEK -gt 1073741824 ];then #1024*1024*1024
-			ONEFREE="`dc $FREEK 1073741824 \/ p`"
-			ONEFREE="`printf "%.1f" $ONEFREE`T"
-		elif [ $FREEK -gt 1048576 ];then #1024*1024
-			ONEFREE="`dc $FREEK 1048576 \/ p`"
-			ONEFREE="`printf "%.1f" $ONEFREE`G"
-		else
-			if [ $FREEK -gt 99 ];then
-				ONEFREE="`expr $FREEK \/ 1024`M"
-			else
-				ONEFREE="`dc $FREEK 1024 \/ p`"
-				ONEFREE="`printf "%.1f" $ONEFREE`M"
-			fi
-		fi
-		if [ "$ONEFREE" = "0.0M" ] || [ "$ONEFREE" = "0M" ]; then ONEFREE=""; fi
+		ONEFREE=$(filesize -bytes=1024 $FREEK)
 		export PIXTEXT="${ONESIZE} / ${ONEFREE}"
 	fi
 	
@@ -454,7 +425,7 @@ TABLIST="`echo -n "$DISKINFO" | cut -f 2 -d '|' | uniq | tr '\n' '|' | sed -e 's
 CURRENTTAB=''
 
 #v408 v410 moved up...  130216 added f2fs...
-VALIDPARTS="`echo "$PARTSINFO" | grep -E 'btrfs|ext2|ext3|ext4|f2fs|hfs|iso9660|jfs|minix|msdos|ntfs|reiser|udf|vfat|xfs'`" #130128
+VALIDPARTS="`echo "$PARTSINFO" | grep -E 'btrfs|ext2|ext3|ext4|f2fs|hfs|iso9660|jfs|minix|msdos|ntfs|reiser|udf|vfat|exfat|xfs'`" #130128
 
 #get actual top tab...
 TOPACTUAL="`echo "$TABLIST" | cut -f 1 -d '|'`"
@@ -634,6 +605,9 @@ do
 		ext*)
 			e2label $ONEDEV 2> /dev/null > /tmp/pmount_${DEVNAME}_LABEL
 			;;
+		exfat)
+			exfatlabel $ONEDEV 2> /dev/null > /tmp/pmount_${DEVNAME}_LABEL
+			;;
 		swap)
 			echo Memory > /tmp/pmount_${DEVNAME}_LABEL
 			export PIXTEXT="${ONESIZE}"
@@ -752,12 +726,6 @@ export GTK2_RC_FILES=/tmp/gtkrc_pmount:$HOME/.gtkrc-2.0
 #                                                                                 #
 ###################################################################################
 
-#[ -s /tmp/pmounterr ] && exit
-#v412, no, do not exit if only a warning error msg...
-if [ -s /tmp/pmounterr ];then
- #w477 running Xvesa: 'Xlib:  extension "Generic Event Extension" missing on display ":0.0".'
- [ "`grep -v -E 'WARNING|Generic Event Extension' /tmp/pmounterr`" != "" ] && exit
-fi
 rm -f /tmp/pmountdlg.txt_${MYPID}
 #if gui killed by pup_eventd, then file will be empty. restart pmount...
 if [ ! -s /tmp/pmountdlg_${MYPID} ];then

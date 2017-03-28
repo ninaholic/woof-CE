@@ -4,11 +4,12 @@
 #120328 rewrite script.
 #120627 use keymaps from kbd pkg if present.
 #120629 raspberry pi does not have a hw clock, set date to reasonable value.
-#130501 passed param from rc.sysinit.
 #130513 modify handling of "ask" passed param.
 
 . /etc/rc.d/PUPSTATE
 . /etc/DISTRO_SPECS #has DISTRO_XORG_AUTO
+. /etc/rc.d/functions_x #keymap_country
+
 STATUS=0
 . /etc/clock
 ARCH=`uname -m`
@@ -16,11 +17,16 @@ ARCH=`uname -m`
 
 [ $pkeys ] && PKEYS=$pkeys #boot parameter
 
-ASKKMAP="yes"; ASKLANG="yes"; ASKCLOCK="no"
-[ "$DISTRO_XORG_AUTO" = "yes" ] && ASKKMAP="no" && ASKLANG="no"
-[ -f /tmp/bootcnt.txt ] && ASKKMAP="yes" && ASKLANG="yes" #file created in 'init' if pfix=nox.
+ASKKMAP="no"
+ASKLANG="no"
+ASKCLOCK="no"
 
-#130501 passed param from rc.sysinit (rc.country is called 2nd time)... 130513 no, only one call.
+if [ -f /tmp/bootcnt.txt ] ; then #file created in 'init' if pfix=nox.
+	ASKKMAP="yes"
+	ASKLANG="yes"
+fi
+
+#pass a param to ask for keymap and language
 if [ $1 ];then
  ASKKMAP="yes"
  ASKLANG="yes"
@@ -52,58 +58,7 @@ askkbdlayout ()
   AKMAP="`basename $AFILE .gz`" #us, fr, br, etc.
   AKMAP="`basename $AKMAP .kmap`" #120627
   AKMAP="`basename $AKMAP .map`" #120627
-  case $AKMAP in
-   us*) ACNTRY="(USA)";;
-   fr*) ACNTRY="(France)";;
-   it*) ACNTRY="(Italy)";;
-   ba*) ACNTRY="(Bashkir)";;
-   be*) ACNTRY="(Belgium)";;
-   bg*) ACNTRY="(Bulgaria)";;
-   br*) ACNTRY="(Brazil)";;
-   by*) ACNTRY="(Byelorussian)";;
-   cf*) ACNTRY="(French-Canadian)";;
-   croat*) ACNTRY="(Croatia)";;
-   cz*) ACNTRY="(Czech)";;
-   de) ACNTRY="(Germany)";;
-   de_*) ACNTRY="(Germany)";;
-   de-*) ACNTRY="(Germany)";;
-   dk*) ACNTRY="(Denmark)";;
-   es*) ACNTRY="(Spain)";;
-   fi*) ACNTRY="(Finland)";;
-   hu*) ACNTRY="(Hungary)";;
-   ka*) ACNTRY="(Kazakhstan)";;
-   ky*) ACNTRY="(Kyrgyzstan)";;
-   et*) ACNTRY="(Estonia)";;
-   lt*) ACNTRY="(Lithuania)";;
-   mk*) ACNTRY="(Macedonia)";;
-   sr*) ACNTRY="(Serbia)";;
-   tr*) ACNTRY="(Turkey)";;
-   tt*) ACNTRY="(Tatar)";;
-   sg*) ACNTRY="(Sango)";;
-   ua*) ACNTRY="(Ukraine)";;
-   gr*) ACNTRY="(Greece)";;
-   il*) ACNTRY="(Israel)";;
-   is*) ACNTRY="(Iceland)";;
-   jp*) ACNTRY="(Japan)";;
-   pc*) ACNTRY="(Japanese/English)";;
-   la*) ACNTRY="(Latin_America)";;
-   nl*) ACNTRY="(Netherlands)";;
-   no*) ACNTRY="(Norway)";;
-   pl*) ACNTRY="(Poland)";;
-   pt*) ACNTRY="(Portugal)";;
-   ro*) ACNTRY="(Romania)";;
-   ru*) ACNTRY="(Russia)";;
-   se*) ACNTRY="(Sweden)";;
-   sv*) ACNTRY="(Sweden)";;
-   sk*) ACNTRY="(Slovakia)";;
-   sl*) ACNTRY="(Slovenia)";;
-   uk*) ACNTRY="(UK)";;
-   wangbe*) ACNTRY="(Belgium)";;
-   azerty) ACNTRY="(Tandon)";;
-   dvorak-r) ACNTRY="(Right_single-handed)";;
-   dvorak-l) ACNTRY="(Left_single-handed)";;
-   *)  ACNTRY="-";;
-  esac
+  ACNTRY=$(keymap_country $AKMAP)
   echo -e "$AKMAP \"${ACNTRY}\"" >> /tmp/keybdlist.txt
  done
  KEYLIST="${FIRSTITEM} `sort /tmp/keybdlist.txt | tr '\n' ' '`"
@@ -159,6 +114,9 @@ fi
 LANG="`grep '^LANG=' /etc/profile | cut -f 2 -d '='`"
 CLANG="`echo "$LANG" | sed -e 's/\.UTF-8/\.utf8/'`" #fix, locale -a always prints .utf8
 
+#precaution - errors in slacko if this dir is missing
+mkdir -p /usr/lib${lsuffix}/locale
+
 if [ "$ASKLANG" = "no" ];then
  #'quicksetup' is run 1st time X starts.
  #need this default locale for X to start first time...
@@ -189,7 +147,7 @@ if [ "$HWDATE" = "" ];then
   #either of these formats can set the date: "29 JUN 2012 10:00:00" "2012-06-28 16:20:08"
   HWDATE="`stat --format=%z /etc/DISTRO_SPECS | cut -f 1 -d '.' | cut -f 1,2 -d ' '`" #creation date of build. ex: "2012-06-28 16:20:08"
   date -s "$HWDATE"
-  [ ! -e /etc/localtime ] && ln -s /usr/share/zoneinfo/Australia/Perth /etc/localtime
+  [ ! -e /etc/localtime ] && ln -s /usr/share/zoneinfo/GMT0 /etc/localtime
  fi
 else
  if [ "$ASKCLOCK" = "yes" ];then
@@ -202,7 +160,7 @@ else
    sed -i "$hwPATTERN" /etc/clock #note, it is default 'localtime'.
   fi
  fi
- [ ! -e /etc/localtime ] && ln -s /usr/share/zoneinfo/Australia/Perth /etc/localtime
+ [ ! -e /etc/localtime ] && ln -s /usr/share/zoneinfo/GMT0 /etc/localtime
  #Ref: http://www.gnu.org/s/libc/manual/html_node/TZ-Variable.html
  TZ=$(readlink /etc/localtime|sed -e 's,/usr/share/zoneinfo/,,' -e 's,Etc/,,') #shinobar
  export TZ

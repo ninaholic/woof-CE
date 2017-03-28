@@ -1,6 +1,7 @@
 #!/bin/bash
-export TEXTDOMAIN=pmusic
 $APPDIR/func -reset_gtk
+export TEXTDOMAIN=pmusic
+export OUTPUT_CHARSET=UTF-8
 [ ! "$GTKDIALOG" ] && GTKDIALOG="gtkdialog" #puppy specific
 if [ -z "$FRAME" ]; then FRAME=" "; fi
 export WORKDIR=$HOME/.pmusic/tmp
@@ -28,6 +29,6 @@ export inputbox="
 </window>"
 #make this workaround to allow `\ in filename
 $GTKDIALOG -p inputbox > $WORKDIR/tmp
-export INPUT="`cat $WORKDIR/tmp | grep -F 'INPUT=' | cut -d'"' -f2`" #'
-export EXIT="`cat $WORKDIR/tmp | grep -F 'EXIT=' | cut -d'"' -f2`" #'
+export INPUT="`grep -F 'INPUT=' $WORKDIR/tmp | cut -d'"' -f2`"
+export EXIT="`grep -F 'EXIT=' $WORKDIR/tmp | cut -d'"' -f2`"
 TXT1=""; DEFAULT=""; FRAME=""; IMG="" #reset to avoid alien text in next box

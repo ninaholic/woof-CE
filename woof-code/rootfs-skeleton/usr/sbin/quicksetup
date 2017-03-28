@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #(c) Copyright Barry Kauler Oct. 2011, http://bkhome.org
 #License: Oct. 2011, GPL3 (refer /usr/share/doc/legal)
 #A GUI when start desktop first time, to replace the text-mode dialogs (locale, keyboard-layout, timezone)
@@ -20,7 +20,6 @@
 #111113 upgraded gtk to 2.24.8, fixed slowness. go back to 'combobox'.
 #111113 fix timezone-set cli app.
 #120209 scripts fixdesk and fixmenus translate files to new language (as specified in /usr/share/sss/menu_strings and desk_strings).
-#120209 added call to fixscripts, to translate language in scripts (as specified in /usr/share/sss/script_strings).
 #120213 when locale change, inform if langpack PET needed.
 #120215 offer to translate initrd.
 #120215 rc.country calls 'chooselocale cli quiet', to run localedef without asking any questions or popups.
@@ -50,12 +49,8 @@
 #130131 xrandr may have more than one frequency on a line, ex:   1360x768       59.8     60.0
 #130202 130131 not enough. xrandr was not setting chosen vertical frequency.
 #130203 fix insertion of fontsize in xml.
-#130501 pupdesk.flg is created in rc.sysinit, for PUPMODE=5. further fixup.
 #130506 detect current xorg driver broken, use same code as in /usr/sbin/report-video.
-#130509 need to creat pupdesk.flg before bring up gui window, with $XDRIVERSUCCESS stored in it, for xorgwizard-cli.
-#130509 also save $XDRIVERSUCCESS in /var/local/quicksetup-pupmode5-autodriver, also for xorgwizard-cli.
 #130511 hostname-set now may return value 2.
-#130513 pupdesk.flg code in rc.sysinit moved to init script in initrd, so different handling here.
 #130701 network frame now always displayed. added checkbox for run apps as spot.
 #131121 fix the xrandr resolution and refresh rates, displays all now, 01micko.
 #131121 fix numerous calls to sed and replace many cut calls with bash, KRG
@@ -72,6 +67,8 @@ export OUTPUT_CHARSET=UTF-8
 . /etc/rc.d/BOOTCONFIG
 . /etc/clock
 . /etc/rc.d/BOOTCONSTRAINED #120714
+
+. /etc/rc.d/functions_x
 
 PARAM1=""
 [ $1 ] && PARAM1="$1"
@@ -90,6 +87,7 @@ COUNTRYFRAMETITLE=$(gettext 'Country')
 XFRAMETITLE=$(gettext 'Graphics')
 BACKTITLE=$(gettext '<b>Quick setup</b>. All these settings (and many more) are available from the Setup and Desktop menu. Please set these to suit yourself, then click <b>Ok</b>')
 ICON="puppy_config"
+NOSPLASH=1
 #specific-purpose utilities...
 case $MYBASE in
  chooselocale)
@@ -130,6 +128,7 @@ case $MYBASE in
   XFRAMETITLE=$(gettext 'Screen Resolution')
   ;;
  *) #quicksetup
+  NOSPLASH=0
   case $BOOT_BOARD in
    raspi) SET_LOCALE="yes"; SET_TIMEZONE="yes"; SET_KEYBOARD="yes"; SET_NETWORK="yes"; SET_RP_AUDIO="yes"; SET_RP_VIDEO="yes" ;; #120714 Raspberry Pi
    *) SET_LOCALE="yes"; SET_TIMEZONE="yes"; SET_KEYBOARD="yes"; SET_XRES="yes"; SET_XWIZARD="yes"; SET_NETWORK="yes" ;; #normal quicksetup.
@@ -141,7 +140,7 @@ esac
 
 XPID=0
 if [ $DISPLAY ];then
- if [ "$PARAM1" != "nosplash" ];then
+ if [ "$PARAM1" != "nosplash" -a $NOSPLASH -eq 0 ];then
   WELCOMEMSG=$(printf "$(gettext 'Welcome to %s!')" "$DISTRO_NAME $DISTRO_VERSION")
   /usr/lib/gtkdialog/box_splash -placement center -close never -fontsize large -icon_width 60 -icon /usr/share/pixmaps/puppy/puppy.svg -text "$WELCOMEMSG" &
   XPID=$!
@@ -235,21 +234,6 @@ Basically, if your language is not a <b>Latin</b> derivative, such as all Asian 
   net)
    HEADING="`gettext 'Network'`"
    echo "$(gettext "Your computer has been assigned a unique name, known as the 'hostname', by which it identifies itself on a network.") $(eval_gettext "It is currently named '\${HOSTNAME}', however you might wish to change that to a name that is more meaningful to yourself, such as 'johnsmithpc'.") $(gettext "The hostname can have letters and numbers, no spaces.")" > /tmp/box_help
-   ;;
-  xorg)
-   HEADING="`gettext 'Xorg Wizards'`"
-   echo "$(gettext 'If you tick a checkbox, you are flagging your wish to run the Wizard, and it will happen after you click the <b>OK</b> button.
-
-<b>Xorg Video Wizard</b>
-This is a text-mode application (keyboard-driven, no mouse, and requires exiting from X (the graphical desktop) to run), that enables you to set the screen resolution, refresh frequency, correct mouse/touchpad, and find a correct hardware-specific driver. Note, the <b>vesa</b> driver is generic, for any video hardware, but is slow. In some cases there is more than one hardware-specific driver and you have to choose the best one -- for example:')
-<i>Intel:  i810 intel
-nVidia: nv nouveau</i>
-
-$(gettext '<b>Video Upgrade Wizard</b>
-What this offers depends on the particular build of Puppy Linux. It may offer upgrade PETs for the commercial nVidia and ATI Xorg drivers. In the case of Wary Puppy, there is an offer to upgrade Xorg from version 7.3 to 7.6. Some builds of Puppy do not offer any upgrades via this Wizard, but may have upgrade PETs available elswhere, such as via the Puppy Package Manager or the Puppy Forum.
-
-<b>Note 1:</b> If you need to run either of these Wizards later on, they are available via the <b>setup</b> icon on the desktop, or the <b>Setup</b> category in the menu.
-<b>Note 2:</b> The <b>Xorg Video Wizard</b> via the <b>setup</b> icon is a full graphical application, with many more options than the text-mode version, such as finetuning screen dimensions and adjusting brightness. You might want to run that afterward to further finetune your X configuration.')" > /tmp/box_help
    ;;
   resolution)
    HEADING="`gettext 'Screen Resolution'`"
@@ -729,16 +713,12 @@ if [ "$SET_COUNTRY" ];then
  ###Choose timezone###
  TIMEZONEXML=""
  if [ "$SET_TIMEZONE" ];then
-  if [ -e /etc/localtime ];then
-   CZONE="`readlink /etc/localtime 2>/dev/null`"
-   [ "$CZONE" = "" ] && rm -f /etc/localtime
-  fi
-  if [ -e /etc/localtime ];then
+  [ -L /etc/localtime -a ! -e /etc/localtime ] && rm -f /etc/localtime
+  CZONE='/usr/share/zoneinfo/GMT0'
+  DEF_TIMEZONE='GMT0'
+  if [ -L /etc/localtime ] ; then
    CZONE="`readlink /etc/localtime`"
    DEF_TIMEZONE="`readlink /etc/localtime | sed -e 's%/usr/share/zoneinfo/%%'`"
-  else
-   CZONE='/usr/share/zoneinfo/Australia/Perth'
-   DEF_TIMEZONE='Australia/Perth'
   fi
   DEF_TIMEZONE=`echo -n "$DEF_TIMEZONE" | sed -e 's%Etc/%%'`
   xDEF_TIMEZONE="`echo -n "$DEF_TIMEZONE" | sed 's%GMT%GMT\\\\%'`"  #the sign needs a \ in front. ex: GMT\+8
@@ -875,58 +855,7 @@ if [ "$SET_COUNTRY" ];then
     AKMAP="`basename $AFILE .gz`" #us, fr, br, etc.
     AKMAP="`basename $AKMAP .kmap`" #120627
     AKMAP="`basename $AKMAP .map`" #120627
-    case $AKMAP in
-     us*) ACNTRY="(USA)";;
-     fr*) ACNTRY="(France)";;
-     it*) ACNTRY="(Italy)";;
-     ba*) ACNTRY="(Bashkir)";;
-     be*) ACNTRY="(Belgium)";;
-     bg*) ACNTRY="(Bulgaria)";;
-     br*) ACNTRY="(Brazil)";;
-     by*) ACNTRY="(Byelorussian)";;
-     cf*) ACNTRY="(French-Canadian)";;
-     croat*) ACNTRY="(Croatia)";;
-     cz*) ACNTRY="(Czech)";;
-     de) ACNTRY="(Germany)";;
-     de_*) ACNTRY="(Germany)";;
-     de-*) ACNTRY="(Germany)";;
-     dk*) ACNTRY="(Denmark)";;
-     es*) ACNTRY="(Spain)";;
-     fi*) ACNTRY="(Finland)";;
-     hu*) ACNTRY="(Hungary)";;
-     ka*) ACNTRY="(Kazakhstan)";;
-     ky*) ACNTRY="(Kyrgyzstan)";;
-     et*) ACNTRY="(Estonia)";;
-     lt*) ACNTRY="(Lithuania)";;
-     mk*) ACNTRY="(Macedonia)";;
-     sr*) ACNTRY="(Serbia)";;
-     tr*) ACNTRY="(Turkey)";;
-     tt*) ACNTRY="(Tatar)";;
-     sg*) ACNTRY="(Sango)";;
-     ua*) ACNTRY="(Ukraine)";;
-     gr*) ACNTRY="(Greece)";;
-     il*) ACNTRY="(Israel)";;
-     is*) ACNTRY="(Iceland)";;
-     jp*) ACNTRY="(Japan)";;
-     pc*) ACNTRY="(Japanese/English)";;
-     la*) ACNTRY="(Latin_America)";;
-     nl*) ACNTRY="(Netherlands)";;
-     no*) ACNTRY="(Norway)";;
-     pl*) ACNTRY="(Poland)";;
-     pt*) ACNTRY="(Portugal)";;
-     ro*) ACNTRY="(Romania)";;
-     ru*) ACNTRY="(Russia)";;
-     se*) ACNTRY="(Sweden)";;
-     sv*) ACNTRY="(Sweden)";;
-     sk*) ACNTRY="(Slovakia)";;
-     sl*) ACNTRY="(Slovenia)";;
-     uk*) ACNTRY="(UK)";;
-     wangbe*) ACNTRY="(Belgium)";;
-     azerty) ACNTRY="(Tandon)";;
-     dvorak-r) ACNTRY="(Right_single-handed)";;
-     dvorak-l) ACNTRY="(Left_single-handed)";;
-     *)  ACNTRY="-";;
-    esac
+    ACNTRY=$(keymap_country $AKMAP)
     if [ "$DEF_KMAP" = "$AKMAP" ];then
      echo "$AKMAP \"${ACNTRY}\" on" >> /var/local/quickset-keyboard-list
     else
@@ -998,111 +927,36 @@ if [ "$SET_COUNTRY" ];then
 fi #end SET_COUNTRY
 
 ###setup x###
-if [ "$SET_X" ];then
-
- #try keep this message short, so renders in one line...
- M_xy="`gettext 'If the Wizard fails to set desired resolution, try this:'`" #used in SET_XRES, but maybe changed in SET_XWIZARD.
-
- if [ "$SET_XWIZARD" ];then
-  #note, quicksetup gets launched from /usr/sbin/delayedrun, but only for xorg, not xvesa.
+if [ "$SET_XWIZARD" ];then
   #put up a button to launch xorgwizard...
-  if [ -f /var/log/Xorg.0.log ];then #log file created when X starts.
-   XDRIVERSUCCESS=''
-   LOADED="$(grep 'Loading .*/xorg/modules/drivers/.*_drv.so' /var/log/Xorg.0.log | rev | cut -f 1 -d '/' | rev | cut -f 1 -d '_' | tr '\n' ' ')"
-   for ALOADED in $LOADED
-   do
-    aPTN="UnloadModule: \"$ALOADED\""
-    bPTN="LoadModule: \"$ALOADED\""
-    #Xorg loaded noauveau, then tried to load it again, failed, then unloaded, so count them...
-    CNTload=`grep "$bPTN" /var/log/Xorg.0.log | wc -l`
-    CNTunload=`grep "$aPTN" /var/log/Xorg.0.log | wc -l`
-    [ $CNTload -eq 0 ] && continue
-    [ $CNTunload -ge $CNTload ] && continue
-    XDRIVERSUCCESS="$ALOADED"
-    break
-   done
-   if [ "$XDRIVERSUCCESS" ];then #precaution.
-
-    #130509 record this for xorgwizard-cli...
-    if [ $PUPMODE -eq 5 ];then
-     if [ "$DISTRO_XORG_AUTO" = "yes" ];then #see /etc/DISTRO_SPECS
-      echo -n "$XDRIVERSUCCESS" > /var/local/quicksetup-pupmode5-autodriver
-     fi
-    fi
-
-    M_xdrv1=$(gettext 'The generic <b>vesa</b> video driver is currently being used. It is recommended that you run the Video Wizard to try and load a hardware-specific driver. Failing that, try the Video Upgrade Wizard.')
-    M_xdrv2=$(gettext 'The')
-    M_xdrv3=$(gettext 'video driver is currently being used. Good, but if you need to adjust screen resolution or displacement, run the Video Wizard.')
+  XDRIVERSUCCESS=$(report-video driver)
+  if [ "$XDRIVERSUCCESS" ];then #precaution.
     TT_xorg1=$(gettext 'Run the Xorg Video Wizard')
     TT_xorg2=$(gettext 'Xorg Video Wizard')
-    B_xwiz=$(gettext 'Video Wizard')
-    B_xup=$(gettext 'Upgrade Wizard')
-    TT_xup1=$(gettext 'Run the Video Upgrade Wizard')
-    TT_xup2=$(gettext 'Video Upgrade Wizard')
-    if [ "$XDRIVERSUCCESS" = "vesa" ];then
-     M_xy="`gettext 'If the Wizards fail to set desired resolution, try this:'`" #used in SET_XRES.
-     XMSGXML="<text use-markup=\"true\"><label>\"${M_xdrv1}\"</label></text>"
-     XWIZARDXML='
+    B_xwiz=$(gettext 'Run Video Wizard')
+    XMSGX=$(gettext "The <b>${XDRIVERSUCCESS}</b> video driver is currently being used. Ok, if you need to adjust screen resolution or displacement, run the Video Wizard.")
+    XMSGRES=$(gettext "Current resolution:<b> $(report-video res) </b> ($(report-video depth) bit)")
+    XWIZARDXML='
      <hbox space-expand="true" space-fill="true">
        '"`/usr/lib/gtkdialog/xml_pixmap graphics.svg icon`"'
-       <text  space-expand="true" space-fill="true"><label>""</label></text>
-       <vbox>
-         <hbox tooltip-text="'${TT_xorg2}'">
-           <checkbox tooltip-text="'${TT_xorg1}'">
-             <variable>CHECK_XORGWIZARD</variable>
-             <label>'${B_xwiz}'</label>
-             <action>if true disable:CHECK_XUPGRADE</action>
-             <action>if false enable:CHECK_XUPGRADE</action>
-           </checkbox>
-         </hbox>
-         <hbox tooltip-text="'${TT_xup2}'">  
-           <checkbox tooltip-text="'${TT_xup1}'">
-             <variable>CHECK_XUPGRADE</variable>
-             <label>'${B_xup}'</label>
-             <action>if true disable:CHECK_XORGWIZARD</action>
-             <action>if false enable:CHECK_XORGWIZARD</action>
-           </checkbox>
-           <button>
-             '"`/usr/lib/gtkdialog/xml_button-icon info mini`"'
-             <action>help xorg</action>
-           </button>
-         </hbox>
-       </vbox>
+       <text space-expand="true" space-fill="true"><label>""</label></text>
+     </hbox>
+     <hbox><text use-markup="true"><label>"'${XMSGX}'"</label></text></hbox>
+     <hbox space-expand="true"><text use-markup="true"><label>"'${XMSGRES}'"</label></text></hbox>
+     <hbox space-expand="true" tooltip-text="'${TT_xorg2}'">
+       <checkbox tooltip-text="'${TT_xorg1}'">
+         <variable>CHECK_XORGWIZARD</variable>
+         <label>'${B_xwiz}'</label>
+       </checkbox>
      </hbox>'
-    else
-     XMSGXML="<text use-markup=\"true\"><label>\"${M_xdrv2} <b>${XDRIVERSUCCESS}</b> ${M_xdrv3}\"</label></text>"
-     XWIZARDXML='
-     <hbox space-expand="true" space-fill="true">
-       '"`/usr/lib/gtkdialog/xml_pixmap graphics.svg icon`"'
-       <text  space-expand="true" space-fill="true"><label>""</label></text>
-       <vbox>
-         <hbox tooltip-text="'${TT_xorg2}'">
-           <checkbox tooltip-text="'${TT_xorg1}'">
-             <variable>CHECK_XORGWIZARD</variable>
-             <label>'${B_xwiz}'</label>
-           </checkbox>
-           <button>
-             '"`/usr/lib/gtkdialog/xml_button-icon info mini`"'
-             <action>help xorg</action>
-           </button>
-         </hbox>
-       </vbox>
-     </hbox>'
-    fi
-   fi
   fi
- fi #end SET_XWIZARD
+fi #end SET_XWIZARD
 
- if [ "$SET_XRES" ];then
+if [ "$SET_XRES" -a ! "$SET_XWIZARD" ];then
+  #try keep this message short, so renders in one line...
+  M_xy="`gettext 'If the Wizard fails to set desired resolution, try this:'`" #used in SET_XRES, but maybe changed in SET_XWIZARD.
   #a combobox to choose resolution...
   FLAG_XYRES="enabled"
-
-  #shinobar...
-  NVIDIABUTTON=""
-  if which nvidia-settings &>/dev/null  && NRATE=$(nvidia-settings -q RefreshRate | grep '[0-9]') ; then
-   NVIDIABUTTON="<button tooltip-text=\"$(gettext 'Launch the NVIDIA X Server Settings.')\" icon_size=\"2\" ><input file>/usr/local/video_upgrade/nvidia48x32.png</input><label>$(gettext 'NVIDIA')</label><action>EXIT:NVIDIA</action></button>"
-   FLAG_XYRES="disabled"
-  fi
 
   XRANDR="`xrandr -q`"
   DEF_XYRES="`echo "$XRANDR" | tr -s ' ' | grep '^ [0-9]' | grep '\*' | cut -f 2 -d ' ' | head -n 1`" #130202 'head -n 1' workaround for dual monitors. (see also .xinitrc)
@@ -1137,7 +991,7 @@ if [ "$SET_X" ];then
   DEFAULT=`grep ' on$' /var/local/quickset-xrandr-list | sed -e 's% on$%%' -e 's%"%%g' -e "s% % ${TABCHAR}%"`
   [ "$DEFAULT" ] && DEFAULTXML="<item>${DEFAULT}</item>" #111107 combobox does not support default tag.
   ITEMS=`sed -e 's% on$%%' -e 's% off$%%' -e 's%"%%g' -e "s% % ${TABCHAR}%" -e 's%^%<item>%' -e 's%$%</item>%' /var/local/quickset-xrandr-list`
-  [ "$SET_XWIZARD" ] && XRANDRWARNXML="<text><label>${M_xy}</label></text>"
+  #[ "$SET_XWIZARD" ] && XRANDRWARNXML="<text><label>${M_xy}</label></text>"
   XYRESXML='
   <vbox space-expand="false" space-fill="false">
     '${XRANDRWARNXML}'
@@ -1154,18 +1008,18 @@ if [ "$SET_X" ];then
        </button>
      </hbox>
    </vbox>'
- fi #end SET_XRES
+fi #end SET_XRES
 
+if [ "$SET_XRES" ] ; then
  XXML='
  <vbox>
    <frame '${XFRAMETITLE}'>
      '${XWIZARDXML}'
-     '${NVIDIABUTTON}'
-     '${XMSGXML}'
      '${XYRESXML}'
    </frame>
  </vbox>'
-fi
+
+fi #end SET_XRES
 
 #120714 alternate audio/video frame for arm board... create $XXML...
 if [ "$SET_RP_AUDIO" -o "$SET_RP_VIDEO" ];then
@@ -1247,57 +1101,18 @@ export QUICKSETUP_DIALOG='
 ###display main window###
 wPID=0
 if [ $DISPLAY ];then
- if [ -s /initrd/tmp/RWPART ];then #see init script in initrd, only exists if PUPMODE=5.
-  pdFLG=0
-  pdDEV="$(cat /initrd/tmp/RWPART | cut -f 1 -d '|')"
-  pdFS="$(cat /initrd/tmp/RWPART | cut -f 2 -d '|')"
-  pdMNTPT="$(cat /proc/mounts | grep "/dev/${pdDEV} " | cut -f 2 -d ' ')"
-  if [ ! "$pdMNTPT" ];then
-   mkdir -p /mnt/$pdDEV
-   mount -t $pdFS /dev/$pdDEV /mnt/$pdDEV
-   pdFLG=1
-   pdMNTPT="/mnt/${pdDEV}"
-  fi
-  [ -f ${pdMNTPT}/pupdesk.flg ] && echo -n "$XDRIVERSUCCESS" > ${pdMNTPT}/pupdesk.flg #init script (in initrd) will read this.
-  if [ $pdFLG -eq 1 ];then
-   sync
-   umount $pdMNTPT
-  fi
- fi
- #note: this mechanism of using pupdesk.flg to force run of xorgwizard at next boot, if user unable
- #to click OK button below, is only for PUPMODE=5. When puppy has a save-file, /root/.XLOADED is used
- #to manage forced reboot, see /usr/bin/xwin.
- #note also, there is a totally different file on the "home" partition, fsckme.flg, that forces a
- #f.s. check if a forced reboot/shutdown (such as power failure).
-
  . /usr/lib/gtkdialog/xml_info gtk #build bg_pixmap for gtk-theme
  RETVALS="`gtkdialog -p QUICKSETUP_DIALOG`"
  eval "$RETVALS"
  [ "$EXIT" != "OK" -a "$EXIT" != "NVIDIA" ] && exit
 
- #130513 modify...
- if [ -s /initrd/tmp/RWPART ];then #see init script in initrd.
-  pdFLG=0
-  pdDEV="$(cat /initrd/tmp/RWPART | cut -f 1 -d '|')"
-  pdFS="$(cat /initrd/tmp/RWPART | cut -f 2 -d '|')"
-  pdMNTPT="$(cat /proc/mounts | grep "/dev/${pdDEV} " | cut -f 2 -d ' ')"
-  if [ ! "$pdMNTPT" ];then
-   mkdir -p /mnt/$pdDEV
-   mount -t $pdFS /dev/$pdDEV /mnt/$pdDEV
-   pdFLG=1
-   pdMNTPT="/mnt/${pdDEV}"
-  fi
-  [ -f ${pdMNTPT}/pupdesk.flg ] && rm -f ${pdMNTPT}/pupdesk.flg
-  if [ $pdFLG -eq 1 ];then
-   sync
-   umount $pdMNTPT
-  fi
- fi
  #get rid of this, as causes xorgwizard to run at next boot (see /root/.profile)...
  [ -f /root/.xorgwizard-reenter ] && rm -f /root/.xorgwizard-reenter
 
- /usr/lib/gtkdialog/box_splash -close never -fontsize large -text "$(gettext 'Processing, please wait...')" & #120524
- wPID=$!
+ if [ ! "$SET_XWIZARD" ];then
+   /usr/lib/gtkdialog/box_splash -placement top -close never -fontsize large -text "$(gettext 'Processing, please wait...')" & #120524
+   wPID=$!
+ fi
 else
  #replace the old single-purpose text-mode scripts...
  case $MYBASE in
@@ -1331,10 +1146,6 @@ fi
 
 ####process choices####
 FLAG_CHANGED=""
-
-if [ "$EXIT" = "NVIDIA" ];then
- nvidia-settings
-fi
 
 if [ "$SET_KEYBOARD" ];then
  #two variables COMBO_KEYBOARD and CHECK_NUMLOCK
@@ -1438,7 +1249,6 @@ if [ "$SET_LOCALE" ];then
    #scripts fixdesk and fixmenus translate files to new language (as specified in /usr/share/sss/menu_strings and desk_strings).
    #so need to call them here...
    #note, these are also called in /etc/rc.d/rc.update, and further down.
-   LANG=${NEWLANG} fixscripts
    LANG=${NEWLANG} fixdesk
    LANG=${NEWLANG} fixmenus
    exit
@@ -1517,13 +1327,6 @@ Nota: Antes de transferir o pacote de língua, você terá que fazer uma conexã
        AVAILTITLE="Нужен пакет локализации"
        AVAILMSG3="Локаль будет изменена на ${LANGCHOICE}, но вам нужно установить языковой пакет для перевода Puppy на ваш язык. Вам нужен PET-пакет с названием \\Zblangpack_${LANG12}\\ZB или \\Zblangpack_${LANG1}\\ZB. Этот процесс ещё не автоматизирован, так, что вам нужно загрузить и установить пакет. Вы можете сделать это в любое время в будущем. Официально поддерживаемые пакеты локализации доступны в Менеджере пакетов Puppy (кликните значок \\Zbinstall\\ZB на рабочем столе), в репозитарии \\Zbnoarch\\ZB."
       ;;
-      es*) #Spanish,
-       AVAILMSG1="Hay un paquete \\Zb${AVAILPACK}\\ZB apropiado en el repositorio de PETs \\Zbnoarch\\ZB, en la categoría \\ZbConfiguración\\ZB. Después de tener una conexión a Internet, pulse el ícono \\Zbinstalar\\ZB del escritorio para abrir el Administrador de Paquetes, luego elija el repositorio y la categoría.
-Nota: Antes de descargar el paquete de idioma, tendrá que hacer una conexión a Internet y usar el Administrador de Paquetes (Package Manager) en inglés. Si piensa que no sabe leer inglés lo suficiente, una alternativa es usar otro sistema operativo, ir a http://distro.ibiblio.org/quirky/pet_packages-noarch y descargar el paquete de idioma. Entonces, inicie Puppy, haga clic en el ícono de partición (donde descargó el paquete de idioma), y haga clic en el PET de paquete de idioma para instalarlo."
-       AVAILMSG2="Hay paquetes de idioma oficiales disponibles en el repositorio \\Zbnoarch\\ZB, sin embargo no hay uno para su idioma. Tal vez haya uno en desarrollo en el Foro de Puppy (cuidado, algunas versiones más antiguas de Puppy tienen paquetes incompatibles). Ó, tal vez usted pueda ofrecerse como voluntario para ayudar y crear un paquete de idioma (haga clic en Menú -> Ayuda -> CÓMO Internacionalizar, por supuesto usted necesitará un buen conocimiento de inglés)."
-       AVAILTITLE="Se necesita un paquete de idioma"
-       AVAILMSG3="El idioma se cambiará a ${LANGCHOICE}, pero usted necesita instalar un paquete de idioma para traducir Puppy a su lengua. Usted necesita un paquete PET llamado \\Zblangpack_${LANG12}\\ZB o \\Zblangpack_${LANG1}\\ZB. No hemos automatizado esto aún, así que tendrá que descargar e instalar el paquete. Puede hacer esto en cualquier momento en el futuro. Hay paquetes de idioma con soporte oficial disponibles usando el Administrador de Paquetes (haga clic en el ícono \\Zbinstalar\\ZB del escritorio), en el repositorio \\Zbnoarch\\ZB."
-      ;;
       *)
        AVAILMSG1="There is a suitable \Zb${AVAILPACK}\ZB package in the \Zbnoarch\ZB PET repository, in the \ZbSetup\ZB category. After you have an Internet connection, click the \Zbinstall\ZB icon on the desktop to run the Puppy Package Manager, then choose the repository and category.
 Note: Before downloading the langpack, you will have to make an Internet connection and use the Puppy Package Manager in English. If you think that you cannot read English sufficiently, an alternative is to run another operating system, go to http://distro.ibiblio.org/quirky/pet_packages-noarch and download the langpack. Then, boot Puppy, click the partition icon on the desktop to mount the partition (where you downloaded the langpack to), then click on the langpack PET to install it."
@@ -1570,7 +1373,6 @@ Note: Before downloading the langpack, you will have to make an Internet connect
    #120209 scripts fixdesk and fixmenus translate files to new language (as specified in /usr/share/sss/menu_strings and desk_strings).
    #so need to call them here...
    #note, these are also called in /etc/rc.d/rc.update ...
-   LANG=${LANGCHOICE}${UTF8} fixscripts
    LANG=${LANGCHOICE}${UTF8} fixdesk
    LANG=${LANGCHOICE}${UTF8} fixmenus
    #...no need to refresh screen, as changing locale requires restart of X.
@@ -1692,19 +1494,11 @@ It is NOT recommended to choose <b>Permanent</b> here, as the default resolution
 fi #end SET_XRES
 
 if [ "$SET_XWIZARD" ];then
-
- if [ "$CHECK_XUPGRADE" = "true" ];then
-  #FLAG_CHANGED="${FLAG_CHANGED}$(gettext 'Video Upgrade Wizard'):yes|" #"Video Upgrade Wizard"
-  /usr/sbin/video_upgrade_wizard
- fi
-
  if [ "$CHECK_XORGWIZARD" = "true" ];then
-  FLAG_CHANGED="${FLAG_CHANGED}$(gettext 'Xorg Video Wizard'):restart|" #"Xorg Video Wizard"
-  sed -i -e "s%^DISTRO_XORG_AUTO.*%DISTRO_XORG_AUTO='no'%" /etc/DISTRO_SPECS #/usr/bin/xwin reads this when X starts.
-  mv -f /etc/X11/xorg.conf /etc/X11/xorg.conf.prev 2>/dev/null #/usr/bin/xwin will then run xorgwizard.
+  #FLAG_CHANGED="${FLAG_CHANGED}$(gettext 'Xorg Video Wizard'):restart|" #"Xorg Video Wizard"
+  xorgwizard first
   echo "ICONWIPE" > /var/local/pup_event_icon_change_flag #120226 .xinitrc -> clean_desk_icons will read this, and redraw drive icons. ...actually, redundant, as xorgwizard does this.
  fi
-
 fi #end SET_XWIZARD
 
 if [ "$SET_NETWORK" ];then #120227
@@ -1831,7 +1625,7 @@ if [ "`echo -n "$FLAG_CHANGED" | grep "restart"`" != "" ];then
  if [ "$EXIT" = "OK" ];then
   rm -rf /tmp/.X0-lock
   sync
-  exec restartwm `cat /etc/windowmanager`
+  exec restartwm
  fi
 fi
 
