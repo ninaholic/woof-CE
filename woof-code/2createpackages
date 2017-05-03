@@ -27,9 +27,6 @@ export LANG=C #faster.
 . ./_00func
 . ./DISTRO_SPECS #has DISTRO_BINARY_COMPAT, DISTRO_COMPAT_VERSION
 [ ! "$DISTRO_DB_SUBNAME" ] && DISTRO_DB_SUBNAME="$DISTRO_COMPAT_VERSION" #121102 fallback if DISTRO_DB_SUBNAME not defined in file DISTRO_SPECS.
-export DISTRO_BINARY_COMPAT #120517 i want this in FIXUPHACK scripts.
-export DISTRO_COMPAT_VERSION DISTRO_FILE_PREFIX DISTRO_TARGETARCH
-
 source_compat_repos  # ./DISTRO_COMPAT_REPOS-
 source_pkgs_specs    #sets DPSFILE / has FALLBACKS_COMPAT_VERSIONS
 . ./DISTRO_PET_REPOS #has PET_REPOS, PACKAGELISTS_PET_ORDER
@@ -37,6 +34,13 @@ source_woofmergevars # ./WOOFMERGEVARS
 set_archdir_var      #ex: ARCHDIR=x86_64-linux-gnu
 set_binaries_var     #ex: BINARIES=tgz_txz-14.2 BINARIES=deb-xenial
 create_local_repos_dirs
+set_layer_type  # aufs or overlay
+
+#./DISTRO_SPECS
+export DISTRO_BINARY_COMPAT #120517 i want this in FIXUPHACK scripts.
+export DISTRO_COMPAT_VERSION DISTRO_FILE_PREFIX DISTRO_TARGETARCH
+#./WOOFMERGEVARS
+export WOOF_HOSTARCH WOOF_TARGETARCH WOOF_COMPATDISTRO WOOF_COMPATVERSION
 
 CURRDIR="`pwd`"
 
@@ -705,8 +709,12 @@ then run this script again and choose to build ${GENERICNAME}." >> ERROR-2CREATE
   [ -d layer_top ] && rm -rf layer_top #precaution
   mkdir -p layer_rw layer_top
   mount -t tmpfs tmpfs layer_rw
-  # -- aufs -- #
-  mount -t aufs -o udba=reval,diropq=w,dirs=layer_rw=rw:sandbox2b=ro layerfs layer_top
+  if [ "$LAYER_TYPE" = 'overlay' ]; then
+    mkdir overlay_workdir
+    mount -t overlay overlay -olowerdir=sandbox2b,upperdir=layer_rw,workdir=overlay_workdir layer_top
+  else
+    mount -t aufs -o udba=reval,diropq=w,dirs=layer_rw=rw:sandbox2b=ro layerfs layer_top
+  fi
   cd layer_top
   /bin/sh ./hack-install.sh
   cd ..
@@ -714,7 +722,8 @@ then run this script again and choose to build ${GENERICNAME}." >> ERROR-2CREATE
   # Same for _DEV
   [ ! -d packages-${DISTRO_FILE_PREFIX}/${GENERICNAME}_DEV ] && mkdir -p packages-${DISTRO_FILE_PREFIX}/${GENERICNAME}_DEV
   # delete the buggers first
-  find layer_rw -name '.wh.*' -exec rm -r '{}' 2>/dev/null \; #| grep -v '\.wh\.\.wh' | sed -e 's%\.wh\.%%' | sed -e 's%layer_rw%%' |
+  clean_out_whiteouts layer_rw
+  #--
   cp -a --remove-destination layer_rw/* packages-${DISTRO_FILE_PREFIX}/${GENERICNAME}/ 2>/dev/null
   # Same for _DEV - note that dangling symlinks get cleaned out later - hopefully!
   cp -a --remove-destination layer_rw/* packages-${DISTRO_FILE_PREFIX}/${GENERICNAME}_DEV/ 2>/dev/null

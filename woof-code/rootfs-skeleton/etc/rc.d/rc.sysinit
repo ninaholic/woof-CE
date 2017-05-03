@@ -145,6 +145,9 @@ firmware_tarball_func() {
 #================================================================
 #                         MAIN
 #================================================================
+# mount devtmpfs early
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+
 #if have just done a switch_root, output a 'done' message...
 [ -d /initrd ] && status_func 0 #note, /initrd does not exist when a full-hd installation.
 
@@ -179,8 +182,11 @@ else
 	echo -n "Starting system..." >/dev/console
 fi
 
-# devtmpfs is enforced
-mount -t devtmpfs devtmpfs /dev 2>/dev/null
+if [ ! -e /dev/loop0 ] ; then
+	if [ "`mount | cut -f 1 -d ' ' | grep -q devtmpfs`" = "" ] ; then
+		( cd / ; tar -zxf /var/lib/dev.tar.gz ; ) #no devtmpfs
+	fi
+fi
 
 # this might be needed by some busybox apps (losetup)
 # it happens in the initrd, add here too.. just in case
@@ -192,6 +198,9 @@ fi
 
 # mount /proc before remounting / as rw (full install)
 mount -t proc none /proc ; STATUS=$((STATUS+$?))
+
+FREERAM=`free | grep -o 'Mem: .*' | tr -s ' ' | cut -f 4 -d ' '` #w481 110405
+QTRFREERAM=`expr $FREERAM \/ 4`
 
 # full-hd-install
 if [ ! -d /initrd ];then
@@ -240,14 +249,12 @@ ln -sv /proc/mounts /etc/mtab
 
 #120503 if kernel mounts a f.s. on /dev, removes my skeleton /dev
 mkdir -p /dev/pts
-mount -o dev,suid /dev/pts ;STATUS=$((STATUS+$?))
+mount -t devpts -o dev,suid,gid=2,mode=620 none /dev/pts ;STATUS=$((STATUS+$?))
 
 mkdir /sys 2>/dev/null
 mount -t sysfs none /sys ;STATUS=$((STATUS+$?))
 
 ##v2.20 some apps need shm (shared memory) (ex: xfdiff)... 100319 do this always...
-FREERAM=`free | grep -o 'Mem: .*' | tr -s ' ' | cut -f 4 -d ' '` #w481 110405
-QTRFREERAM=`expr $FREERAM \/ 4`
 mkdir -p /dev/shm #120503 if kernel mounts a f.s. on /dev, removes my skeleton /dev
 mount -t tmpfs -o size=${QTRFREERAM}k shmfs /dev/shm ;STATUS=$((STATUS+$?))
 
@@ -288,16 +295,18 @@ mount -a #Load fstab entries
 [ "$BOOT_DISABLESWAP" ] && SWAPON="$BOOT_DISABLESWAP" #120704 now ask in 3builddistro if want use swap file/partition. anything not "yes" means no.
 EXTRAALLOCK=0
 [ "$SWAPON" != "yes" ] && loadswap_func
-if [ "$(grep '/initrd/mnt/tmpfs' /proc/mounts)" != "" ];then #mounted
  # resize tmpfs
  # this code is meant to increase the size of the tmpfs
  # taking into account swap space and sfs_ram_sizek[might be removed]
- [ "$SWAPON" = "yes" ] && EXTRAALLOCK=$(($EXTRAALLOCK / 2048)) #use half in KiB
- RAMSIZE=$(free | grep -o 'Mem: .*' | tr -s ' ' | cut -f 2 -d ' ')
- FREEK=$(($RAMSIZE / 2)) #half of physical.
- ALLOCK=$(($FREEK + $EXTRAALLOCK))
+[ "$SWAPON" = "yes" ] && EXTRAALLOCK=$(($EXTRAALLOCK / 2048)) #use half in KiB
+RAMSIZE=$(free | grep -o 'Mem: .*' | tr -s ' ' | cut -f 2 -d ' ')
+FREEK=$(($RAMSIZE / 2)) #half of physical.
+ALLOCK=$(($FREEK + $EXTRAALLOCK))
+if [ "$(grep '/initrd/mnt/tmpfs' /proc/mounts)" != "" ];then #mounted
  [ -s /initrd/tmp/sfs_ram_sizek ] && ALLOCK=$(($ALLOCK + $(cat /initrd/tmp/sfs_ram_sizek))) #proper size
  mount -t tmpfs -o remount,size=${ALLOCK}k tmpfs /initrd/mnt/tmpfs
+elif [ ! -d /initrd ];then #full-install
+ mount -t tmpfs -o remount,size=${ALLOCK}k tmpfs /tmp
 fi
 
 # Setup /mnt/home symlink before sfs_load

@@ -20,27 +20,18 @@ for i in $@ ; do
 	case $i in
 		clean) DO_CLEAN=1 ; break ;;
 		auto) AUTO=yes ; shift ;;
-		nopae) x86_disable_pae=yes ; shift ;;
-		i486) x86_set_i486=yes ; shift ;;
+		nopae) x86_disable_pae=yes ; shift ;; #funcs.sh
+		pae)   x86_enable_pae=yes  ; shift ;; #funcs.sh
+		i486)  x86_set_i486=yes    ; shift ;; #funcs.sh
+		i686)  x86_set_i686=yes    ; shift ;; #funcs.sh
 	esac
 done
 
 if [ $DO_CLEAN ] ; then
-	echo -en "\033[1;35m""WARNING\033[0m" #purple?
-	echo " This will delete all builds and sources but wont touch configs."
-	echo "Hit CTRL+C and save your stuff manually if you don't want to clean."
-	echo "Hit ENTER to clean"
-	read clean
 	echo "Please wait..."
-	rm -rf ./{dist,aufs*,kernel*,build.log*,linux-*}
+	rm -rf ./{aufs*,kernel*,build.log*,linux-*}
 	echo "Cleaning complete"
 	exit 0
-fi
-
-if [ -d ./dist ] ; then
-	echo "This is not a clean kit. Hit ENTER to continue"
-	echo "or CTRL+C to quit and run './build.sh clean'"
-	[ "$AUTO" != "yes" ] && read notcleango || echo
 fi
 
 ## delete the previous log
@@ -52,6 +43,8 @@ for app in git gcc make ; do
 	$app --version &>/dev/null || exit_error "\033[1;31m""$app is not installed""\033[0m"
 done
 which mksquashfs &>/dev/null || exit_error "\033[1;30m""mksquashfs is not installed""\033[0m"
+log_ver #funcs.sh
+which cc &>/dev/null || ln -sv $(which gcc) /usr/bin/cc
 
 if [ "$AUTO" = "yes" ] ; then
 	[ ! "$DOTconfig_file" ] && exit_error "Must specify DOTconfig_file=<file> in build.conf"
@@ -172,8 +165,6 @@ fi
 #------------------------------------------------------------------
 FW_URL=${FW_URL:-http://distro.ibiblio.org/puppylinux/firmware}
 # $package_name_suffix $custom_suffix $kernel_ver
-kernel_version_full=${kernel_version}${custom_suffix}
-kernel_srcsfs_version=${kernel_version}
 aufs_git_3="git://git.code.sf.net/p/aufs/aufs3-standalone.git"
 aufs_git_4="git://github.com/sfjro/aufs4-standalone.git"
 [ ! "$kernel_mirrors" ] && kernel_mirrors="ftp://www.kernel.org/pub/linux/kernel"
@@ -560,7 +551,6 @@ cp Makefile Makefile-orig
 if [ "$remove_sublevel" = "yes" ] ; then
 	log_msg "Resetting the minor version number" #!
 	sed -i "s/^SUBLEVEL =.*/SUBLEVEL = 0/" Makefile
-	log_msg "kernel_srcsfs_version=$kernel_srcsfs_version"
 fi
 ## custom suffix
 if [ -n "${custom_suffix}" ] || [ $LIBRE -eq 1 ] ; then
@@ -581,7 +571,7 @@ do
 	diff -q ${i}.orig ${i} &>/dev/null || diff -up ${i}.orig ${i} > ../output/patches-${kernel_version}-${HOST_ARCH}/${z}.patch
 done
 
-for patch in ../patches/* ; do
+for patch in ../patches/*.patch ../patches/${kernel_major_version}/*.patch ; do
 	[ ! -f "$patch" ] && continue #../patches/ might not exist or it may be empty
 	log_msg "Applying $patch"
 	patch -p1 < $patch >> ${BUILD_LOG} 2>&1
@@ -611,24 +601,8 @@ if ! grep -q "CONFIG_AUFS_FS=y" .config ; then
 	echo -e "\033[0m" #reset to original
 fi
 
-#---- old/legacy stuff
-if [ "$x86_disable_pae" = "yes" ] ; then
-	if grep 'CONFIG_X86_PAE=y' .config ; then #CONFIG_HIGHMEM64G=y
-		log_msg "Disabling PAE..."
-		MAKEOLDCONFIG=1
-		unset_pae .config
-	fi
-fi
-if [ "$x86_set_i486" = "yes" ] ; then
-	if grep -q 'CONFIG_OUTPUT_FORMAT="elf32-i386"' .config ; then
-		if ! grep -q 'CONFIG_M486=y' .config ; then
-			log_msg "Forcing i486..."
-			MAKEOLDCONFIG=1
-			set_i486 .config
-		fi
-	fi
-fi
-[ "$MAKEOLDCONFIG" != "" ] && make silentoldconfig
+#----
+i386_specific_stuff #pae/nopae i486/i686 - funcs.sh
 #----
 
 [ -f .config -a ! -f ../DOTconfig ] && cp .config ../DOTconfig
@@ -687,35 +661,18 @@ fi
 
 #------------------------------------------------------------------
 
-## kernel headers
-kheaders_dir="kernel_headers-${kernel_version}-${package_name_suffix}"
-rm -rf ../output/${kheaders_dir}
-if [ ! -d ../output/${kheaders_dir} ] ; then
-	log_msg "Creating the kernel headers package"
-	make headers_check >> ${BUILD_LOG} 2>&1
-	make INSTALL_HDR_PATH=${kheaders_dir}/usr headers_install >> ${BUILD_LOG} 2>&1
-	find ${kheaders_dir}/usr/include \( -name .install -o -name ..install.cmd \) -delete
-	mv ${kheaders_dir} ../output
-fi
-
-log_msg "Compiling the kernel" | tee -a ${BUILD_LOG}
-make ${JOBS} bzImage modules >> ${BUILD_LOG} 2>&1
-KCONFIG="output/DOTconfig-${kernel_version}-${HOST_ARCH}-${today}"
-cp .config ../${KCONFIG}
-
 ## we need the arch of the system being built
-if grep -q 'CONFIG_X86_64=y' ../${KCONFIG} ; then
+if grep -q 'CONFIG_X86_64=y' .config ; then
 	arch=x86_64
 	karch=x86
-elif grep -q 'CONFIG_X86_32=y' ../${KCONFIG} ; then
-	if grep -q 'CONFIG_X86_32_SMP=y' ../${KCONFIG} ; then
+elif grep -q 'CONFIG_X86_32=y' .config ; then
+	karch=x86
+	if grep -q 'CONFIG_X86_32_SMP=y' .config ; then
 		arch=i686
-		karch=x86
 	else
 		arch=i486 #gross assumption
-		karch=x86
 	fi
-elif grep -q 'CONFIG_ARM=y' ../${KCONFIG} ; then
+elif grep -q 'CONFIG_ARM=y' .config ; then
 	arch=arm
 	karch=arm
 else
@@ -724,7 +681,65 @@ else
 	karch=arm
 fi
 
-if [ $karch == 'x86' ] ; then
+#.....................................................................
+linux_kernel_dir=linux_kernel-${kernel_version}-${package_name_suffix}
+#.....................................................................
+
+## kernel headers
+kheaders_dir="kernel_headers-${kernel_version}-${package_name_suffix}-$arch"
+rm -rf ../output/${kheaders_dir}
+log_msg "Creating the kernel headers package"
+make headers_check >> ${BUILD_LOG} 2>&1
+make INSTALL_HDR_PATH=${kheaders_dir}/usr headers_install >> ${BUILD_LOG} 2>&1
+find ${kheaders_dir}/usr/include \( -name .install -o -name ..install.cmd \) -delete
+mv ${kheaders_dir} ../output
+
+#---------------------------------------------------------------------
+#  build aufs-utils userspace modules (**) - requires kernel headers 
+#---------------------------------------------------------------------
+	log_msg "Building aufs-utils - userspace modules"
+	## see if fhsm is enabled in kernel config
+	if grep -q 'CONFIG_AUFS_FHSM=y' .config ; then
+		export MAKE="make BuildFHSM=yes"
+	else
+		export MAKE="make BuildFHSM=no"
+	fi
+	LinuxSrc=${CWD}/output/${kheaders_dir} #needs absolute path
+	#---
+	cd ../aufs-util
+	export CPPFLAGS="-I $LinuxSrc/usr/include"
+	echo "export CPPFLAGS=\"-I $LinuxSrc/usr/include\"
+make clean
+$MAKE
+make DESTDIR=$CWD/output/aufs-util-${kernel_version}-${arch} install
+" > compile ## debug
+	make clean &>/dev/null
+	$MAKE >> ${BUILD_LOG} 2>&1 || exit_error "Failed to compile aufs-util"
+	make DESTDIR=$CWD/output/aufs-util-${kernel_version}-${arch} install >> ${BUILD_LOG} 2>&1 #needs absolute path
+	make clean >> ${BUILD_LOG} 2>&1
+	# temp hack - https://github.com/puppylinux-woof-CE/woof-CE/issues/889
+	mkdir -p $CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib
+	mv -fv $CWD/output/aufs-util-${kernel_version}-${arch}/libau.so* \
+		$CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib 2>/dev/null
+	if [ "$arch" = "x86_64" ] ; then
+		mv $CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib \
+			$CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib64
+	fi
+	log_msg "aufs-util-${kernel_version} is in output"
+	#---
+	cd ..
+#------------------------------------------------------
+cd linux-${kernel_version}
+
+echo "make ${JOBS} bzImage modules
+make INSTALL_MOD_PATH=${linux_kernel_dir} modules_install" > compile ## debug
+
+log_msg "Compiling the kernel" | tee -a ${BUILD_LOG}
+make ${JOBS} bzImage modules >> ${BUILD_LOG} 2>&1
+KCONFIG="output/DOTconfig-${kernel_version}-${HOST_ARCH}-${today}"
+cp .config ../${KCONFIG}
+
+if [ "$karch" = "x86" ] ; then
 	if [ ! -f arch/x86/boot/bzImage -o ! -f System.map ] ; then
 		exit_error "Error: failed to compile the kernel sources."
 	fi
@@ -734,27 +749,23 @@ else
 	fi
 fi
 
-#.....................................................................
-linux_kernel_dir=linux_kernel-${kernel_version}-${package_name_suffix}
-#.....................................................................
-
 #---------------------------------------------------------------------
 
 log_msg "Creating the kernel package"
 make INSTALL_MOD_PATH=${linux_kernel_dir} modules_install >> ${BUILD_LOG} 2>&1
-rm -f ${linux_kernel_dir}/lib/modules/${kernel_srcsfs_version}${custom_suffix}/{build,source}
+rm -f ${linux_kernel_dir}/lib/modules/${kernel_version}${custom_suffix}/{build,source}
 mkdir -p ${linux_kernel_dir}/boot
 mkdir -p ${linux_kernel_dir}/etc/modules
 ## /boot/config-$(uname -m)     ## http://www.h-online.com/open/features/Good-and-quick-kernel-configuration-creation-1403046.html
-cp .config ${linux_kernel_dir}/boot/config-${kernel_version_full}
+cp .config ${linux_kernel_dir}/boot/config-${kernel_version}${custom_suffix}
 ## /boot/Sytem.map-$(uname -r)  ## https://en.wikipedia.org/wiki/System.map
-cp System.map ${linux_kernel_dir}/boot/System.map-${kernel_version_full}
+cp System.map ${linux_kernel_dir}/boot/System.map-${kernel_version}${custom_suffix}
 ## /etc/moodules/..
 cp .config ${linux_kernel_dir}/etc/modules/DOTconfig-${kernel_version}-${today}
-cp ${linux_kernel_dir}/lib/modules/${kernel_srcsfs_version}${custom_suffix}/modules.builtin \
-	${linux_kernel_dir}/etc/modules/modules.builtin-${kernel_version_full}
-cp ${linux_kernel_dir}/lib/modules/${kernel_srcsfs_version}${custom_suffix}/modules.order \
-	${linux_kernel_dir}/etc/modules/modules.order-${kernel_version_full}
+cp ${linux_kernel_dir}/lib/modules/${kernel_version}${custom_suffix}/modules.builtin \
+	${linux_kernel_dir}/etc/modules/modules.builtin-${kernel_version}${custom_suffix}
+cp ${linux_kernel_dir}/lib/modules/${kernel_version}${custom_suffix}/modules.order \
+	${linux_kernel_dir}/etc/modules/modules.order-${kernel_version}${custom_suffix}
 
 #cp arch/x86/boot/bzImage ${linux_kernel_dir}/boot/vmlinuz
 BZIMAGE=`find . -type f -name bzImage | head -1`
@@ -778,64 +789,22 @@ make prepare >> ${BUILD_LOG} 2>&1
 cd ..
 #----
 
+log_msg "Installing aufs-utils into kernel package"
+cp -a --remove-destination output/aufs-util-${kernel_version}-${arch}/* \
+		output/${linux_kernel_dir}
+
 log_msg "Creating a kernel sources SFS"
 mkdir -p kernel_sources-${kernel_version}-${package_name_suffix}/usr/src
 mv linux-${kernel_version} kernel_sources-${kernel_version}-${package_name_suffix}/usr/src/linux
-mkdir -p kernel_sources-${kernel_version}-${package_name_suffix}/lib/modules/${kernel_srcsfs_version}${custom_suffix}
-ln -s /usr/src/linux kernel_sources-${kernel_version}-${package_name_suffix}/lib/modules/${kernel_srcsfs_version}${custom_suffix}/build
+mkdir -p kernel_sources-${kernel_version}-${package_name_suffix}/lib/modules/${kernel_version}${custom_suffix}
+ln -s /usr/src/linux kernel_sources-${kernel_version}-${package_name_suffix}/lib/modules/${kernel_version}${custom_suffix}/build
 if [ ! -f kernel_sources-${kernel_version}-${package_name_suffix}/usr/src/linux/include/linux/version.h ] ; then
 	ln -s /usr/src/linux/include/generated/uapi/linux/version.h \
 		kernel_sources-${kernel_version}-${package_name_suffix}/usr/src/linux/include/linux/version.h
 fi
-ln -s /usr/src/linux kernel_sources-${kernel_version}-${package_name_suffix}/lib/modules/${kernel_srcsfs_version}${custom_suffix}/source
+ln -s /usr/src/linux kernel_sources-${kernel_version}-${package_name_suffix}/lib/modules/${kernel_version}${custom_suffix}/source
 mksquashfs kernel_sources-${kernel_version}-${package_name_suffix} output/kernel_sources-${kernel_version}-${package_name_suffix}.sfs $COMP
 md5sum output/kernel_sources-${kernel_version}-${package_name_suffix}.sfs > output/kernel_sources-${kernel_version}-${package_name_suffix}.sfs.md5.txt
-
-
-#==============================================================
-#           build aufs-utils userspace modules (**)
-#==============================================================
-#log_msg "Extracting the Aufs-util sources"
-
-## see if fhsm is enabled in kernel config
-if grep -q 'CONFIG_AUFS_FHSM=y' ${KCONFIG} ; then
-	export MAKE="make BuildFHSM=yes"
-else
-	export MAKE="make BuildFHSM=no"
-fi
-LinuxSrc=$(find $CWD -type d -name "kernel_headers*" | head -1)
-export CPPFLAGS="-I $LinuxSrc/usr/include"
-
-echo "export CPPFLAGS=\"-I $LinuxSrc/usr/include\"
-make clean
-$MAKE
-make DESTDIR=$CWD/output/aufs-util-${kernel_version}-${arch} install
-" > compile ## debug
-
-cd aufs-util
-make clean &>/dev/null
-$MAKE >> ${BUILD_LOG} 2>&1 || exit_error "Failed to compile aufs-util, do it manually. Kernel is compiled OK :)"
-make DESTDIR=$CWD/output/aufs-util-${kernel_version}-${arch} install >> ${BUILD_LOG} 2>&1 #needs absolute path
-make clean >> ${BUILD_LOG} 2>&1
-
-# temp hack - https://github.com/puppylinux-woof-CE/woof-CE/issues/889
-mkdir -p $CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib
-mv -fv $CWD/output/aufs-util-${kernel_version}-${arch}/libau.so* \
-	$CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib 2>/dev/null
-
-if [ "$arch" = "x86_64" ] ; then
-	mv $CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib \
-		$CWD/output/aufs-util-${kernel_version}-${arch}/usr/lib64
-fi
-log_msg "aufs-util-${kernel_version} is in output"
-
-#----
-cd ..
-#----
-
-log_msg "Installing aufs-utils into kernel package"
-cp -a --remove-destination output/aufs-util-${kernel_version}-${arch}/* \
-	output/${linux_kernel_dir}
 
 #==============================================================
 

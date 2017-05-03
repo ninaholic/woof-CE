@@ -25,6 +25,9 @@ source_pkgs_specs    # ./DISTRO_PKGS_SPECS-
 . ./DISTRO_PET_REPOS #120506 want variable PACKAGELISTS_PET_ORDER
 source_woofmergevars # ./WOOFMERGEVARS
 
+set_layer_type  # aufs or overlay
+set_archdir_var # ex: ARCHDIR=x86_64-linux-gnu
+
 #64 bit
 [ "$WOOF_TARGETARCH" = "x86_64" ] && lsuffix=64 || lsuffix= #140121 for 64bit ${lsuffix}
 
@@ -130,9 +133,9 @@ if [ ! -f support/rootfs-packages.conf ];then
 	       LIST="sfs_load|pfilesearch|pfind|firewall_ng"
 	       echo "$d" | egrep -q "$LIST" && def=true || def=false 
 	       case "$d" in
-	        mscw|sfs_load|pgprs) def=true ;;
-			change_kernels)
-				def=true
+	        mscw|sfs_load|pgprs|change_kernels) def=true ;;
+			lxde_menu_support)
+				grep -q 'yes|pcmanfm' DISTRO_PKGS_SPECS-${DISTRO_BINARY_COMPAT}-${DISTRO_COMPAT_VERSION} && def=true
 				;;
 			jwm_config|ptheme|ptheme_buntoo)
 				if grep 'jwmconfig' DISTRO_PKGS_SPECS-${DISTRO_BINARY_COMPAT}-${DISTRO_COMPAT_VERSION} |\
@@ -181,7 +184,7 @@ if [ ! -f support/rootfs-packages.conf ];then
 				fi #depends wpa_supplicant
 				;;
 			*)
-				if grep "$d" DISTRO_PKGS_SPECS-${DISTRO_BINARY_COMPAT}-${DISTRO_COMPAT_VERSION} |\
+				if grep "|${d}" DISTRO_PKGS_SPECS-${DISTRO_BINARY_COMPAT}-${DISTRO_COMPAT_VERSION} |\
 				grep -q '^yes' ;then
 					state=false # don't overwrite user chosen specs
 					def=false
@@ -252,7 +255,6 @@ rm $CHOICE
 #creates devx-only-installed-packages.
 ./support/findwoofinstalledpkgs # moved to here so we can add /tmp/rootfs-packages.specs
 rm -f sandbox3/rootfs-complete/pinstall.sh
-set_archdir_var #ex: ARCHDIR=x86_64-linux-gnu
 
 if [ "$ARCHDIR" ];then #ex: i386-linux-gnu
  ln -snf ./ sandbox3/rootfs-complete/lib${lsuffix}/${ARCHDIR}
@@ -565,9 +567,15 @@ echo
 rm -rf build 2>/dev/null
 mkdir build
 
+case "$KERNEL_TARBALL_URL" in *.pet) KPET=yes  ;; esac
+
 if [ "$DISTRO_KERNEL_PET" = 'Raspbian_Kernel' ];then
  #do nothing.
  echo -n #-------
+
+elif [ "$KPET" = "yes" -a "$SDFLAG" = "" ] ; then
+ . ../support/kernel_pet.sh #source
+
 else # Huge_Kernel
 
 echo "Installing HUGE kernel"
@@ -626,10 +634,10 @@ choose_kernel_to_download() {
 	 echo "Please choose the number of the kernel you wish to download"
 	 cat $TMP2
 	 read choice_k
-	 choice=`grep ^$choice_k $TMP2`
+	 choice=`grep "^$choice_k " $TMP2`
 	 [ ! "$choice" ] && echo "invalid choice" && continue
-	 echo "You chose ${choice##* }. Hit ENTER to continue"
-	 read
+	 echo "You chose ${choice##* }."
+	 sleep 3
 	 break
 	done
 	download_kernel "$KERNEL_REPO_URL/${choice##* }"
@@ -659,8 +667,8 @@ choose_kernel() {
 	 read choice_k3
 	 choice3=`grep ^$choice_k3 $TMP`
 	 [ ! "$choice3" ] && echo "invalid choice3" && continue
-	 echo "You chose ${choice3##* }. Hit ENTER to continue"
-	 read
+	 echo "You chose ${choice3##* }."
+	 sleep 3
 	 break
 	done
 	KERNEL_VERSION=`echo ${choice3##* } |cut -d '-' -f2-|rev|cut -d '.' -f3-|rev`
@@ -686,36 +694,38 @@ cd ..
 #end 140617
 fi # Huge_Kernel
 
-#120613 kernel image can have different names. rename to vmlinuz, however change back later if build sd card...
+#========================
+
+if [ "$KPET" = "yes" -a "$SDFLAG" = "" ] ; then
+	rootfs=zdrv #produced by support/kernel_pet.sh
+else
+	rootfs=rootfs-complete
+fi
+
 REALKERNAME='vmlinuz'
-[ -f rootfs-complete/boot/vmlinuz ] && cp rootfs-complete/boot/vmlinuz build/
-if [ -f rootfs-complete/boot/uImage ];then #mele a1000
- cp rootfs-complete/boot/uImage build/vmlinuz #120506 arm builds, using different name for kernel.
+[ -f ${rootfs}/boot/vmlinuz ] && cp ${rootfs}/boot/vmlinuz build/
+if [ -f ${rootfs}/boot/uImage ];then #mele a1000
+ cp ${rootfs}/boot/uImage build/vmlinuz #120506 arm builds, using different name for kernel.
  REALKERNAME='uImage'
 fi
-if [ -f rootfs-complete/boot/kernel.img ];then #raspberry pi
- cp rootfs-complete/boot/kernel.img build/vmlinuz
+if [ -f ${rootfs}/boot/kernel.img ];then #raspberry pi
+ cp ${rootfs}/boot/kernel.img build/vmlinuz
  REALKERNAME='kernel.img'
 fi
-if [ -f rootfs-complete/boot/kernel7.img ];then #raspberry pi2
- cp rootfs-complete/boot/kernel7.img build/vmlinuz7
+if [ -f ${rootfs}/boot/kernel7.img ];then #raspberry pi2
+ cp ${rootfs}/boot/kernel7.img build/vmlinuz7
  REALKERNAME='kernel.img'
 fi
-if [ -f rootfs-complete/boot/vmlinuz-*-rpi ];then #raspberry pi, Raspbian kernel
- mv rootfs-complete/boot/vmlinuz-*-rpi build/vmlinuz
+if [ -f ${rootfs}/boot/vmlinuz-*-rpi ];then #raspberry pi, Raspbian kernel
+ mv ${rootfs}/boot/vmlinuz-*-rpi build/vmlinuz
  REALKERNAME='kernel.img'
 fi
-if [ -f rootfs-complete/boot/vmlinuz-*-rpi2 ];then #raspberry pi2, Raspbian kernel
- mv rootfs-complete/boot/vmlinuz-*-rpi2 build/vmlinuz7
+if [ -f ${rootfs}/boot/vmlinuz-*-rpi2 ];then #raspberry pi2, Raspbian kernel
+ mv ${rootfs}/boot/vmlinuz-*-rpi2 build/vmlinuz7
  REALKERNAME='kernel.img'
 fi
-[ -f rootfs-complete/boot/System.map ] && cp rootfs-complete/boot/System.map ./
+[ -f ${rootfs}/boot/System.map ] && cp ${rootfs}/boot/System.map ./
 sync
-[ "$REALKERNAME" != 'kernel.img' ] && rm -rf rootfs-complete/boot 2 > /dev/null #do not delete raspberry pi bootloader.
-#100911 16-byte id-string appended. init can determine boot partition.
-cd build
-echo
-cd -
 
 #download/verify static initrd-progs
 (
@@ -770,6 +780,37 @@ echo "LANG: ${DEFAULTLANG}"
 #i think also, set LANG in /etc/profile...
 sed -i -e "s%^LANG=.*%LANG=${DEFAULTLANG}%" rootfs-complete/etc/profile
 echo
+
+if [ "$KPET" = "yes" -a "$SDFLAG" = "" ] ; then
+	# see also support/kernel_pet.sh
+	#091222 support laptop internal sd/mmc cards at bootup...
+	MEMXTRAMODS='tifm_core.ko tifm_7xx1.ko mmc_core.ko mmc_block.ko tifm_sd.ko led-class.ko sdhci.ko sdhci-pci.ko'
+	#v423 2.6.29/30 kernels have extra hid-* modules needed for wireless keyboard to work...
+	#HIDXTRAMODS='hid-a4tech.ko hid-apple.ko hid-belkin.ko hid-cherry.ko hid-chicony.ko hid-cypress.ko hid-ezkey.ko hid-gyration.ko hid-logitech.ko hid-microsoft.ko hid-monterey.ko hid-ntrig.ko hid-petalynx.ko hid-pl.ko hid-samsung.ko hid-sony.ko hid-sunplus.ko hid-topseed.ko'
+	#110712 reduce list a bit, exclude hid drivers that are not keyboard (note, 2.6.39-3 kernel configured with them builtin)...
+	#  removed: hid-gyration.ko hid-ntrig.ko hid-petalynx.ko hid-pl.ko hid-sony.ko hid-sunplus.ko hid-topseed.ko
+	HIDXTRAMODS='hid-a4tech.ko hid-apple.ko hid-belkin.ko hid-cherry.ko hid-chicony.ko hid-cypress.ko hid-ezkey.ko hid-logitech.ko hid-microsoft.ko hid-monterey.ko hid-samsung.ko'
+	#copy some modules to initrd-tree/... w007 added nls_utf8.ko w468 added nls_cp850.ko w476 added nls_iso8859-2.ko, nls_cp850.ko, nls_cp852.ko. 100214 added floppy.ko, psmouse.ko
+	#100406 add btrfs.ko and its deps libcrc32c.ko,zlib_deflate.ko
+	#121227 if kernel has f.s. drivers as modules (quirky6), added ext2.ko ext3.ko ext4.ko fat.ko msdos.ko vfat.ko ntfs.ko reiserfs.ko udf.ko, and deps: jbd.ko mbcache.ko jbd2.ko
+	NEEDEDINITRDMODS=" ${SCSIDRVS} aufs.ko cdrom.ko fuse.ko ide-cd.ko ide-floppy.ko nls_cp437.ko nls_cp850.ko nls_cp852.ko nls_iso8859-1.ko nls_iso8859-2.ko nls_utf8.ko nls_cp850.ko sqlzma.ko squashfs.ko sr_mod.ko unionfs.ko unlzma.ko aes.ko aes_generic.ko blkcipher.ko crypto_blkcipher.ko cbc.ko cryptoloop.ko rsrc_nonstatic.ko yenta_socket.ko ehci-hcd.ko ohci-hcd.ko uhci-hcd.ko usb-storage.ko usbcore.ko usbhid.ko scsi_wait_scan.ko ssb.ko ${HIDXTRAMODS} ${DISTRO_MODULES} ${MEMXTRAMODS} floppy.ko psmouse.ko btrfs.ko libcrc32c.ko zlib_deflate.ko ext2.ko ext3.ko ext4.ko fat.ko msdos.ko vfat.ko ntfs.ko reiserfs.ko udf.ko jbd.ko mbcache.ko jbd2.ko "
+	NEEDEDINITRDMODS="`echo -n "$NEEDEDINITRDMODS" | tr -s ' ' | tr ' ' '\n' | sort -u | tr '\n' ' '`"
+	for ONENEEDED in $NEEDEDINITRDMODS
+	do
+	 echo -n "$ONENEEDED "
+	 FNDONE="`find zdrv/lib/modules -type f -name $ONENEEDED | sed -e 's%zdrv/%/%'`"
+	 if [ "$FNDONE" != "" ];then
+	  FNDDIR="`dirname $FNDONE`"
+	  mkdir -p initrd-tree$FNDDIR
+	  cp -a zdrv${FNDONE} initrd-tree${FNDONE}
+	  [ "$WOOF_TARGETARCH" != "x86_64" ] && gzip initrd-tree${FNDONE}
+	  [ "$SDFLAG" = "" ] && rm -f zdrv${FNDONE} #avoid duplication. 120521 SD-image, do not delete.
+	 fi
+	done
+	busybox depmod -b $WKGDIR/sandbox3/initrd-tree -F $WKGDIR/sandbox3/System.map $KERNELVER
+	#depmod  -b $WKGDIR/sandbox3/initrd-tree -F $WKGDIR/sandbox3/System.map $KERNELVER
+	sync
+fi
 
 #### initrd-progs #### build/initrd.gz...
 rm -f build/initrd.[gx]z
@@ -936,7 +977,7 @@ mv -f /tmp/petget_woof-installed-packages rootfs-complete/root/.packages/woof-in
 #120628 certain utilities are not appropriate when booting on an arm board...
 if [ "$SDFLAG" != "" ];then
  for i in usr/sbin/grubconfig usr/sbin/remasterpup2 usr/sbin/resizepfile.sh \
- usr/sbin/wakepup2 usr/share/applications/Grub-bootloader-config.desktop \
+ usr/share/applications/Grub-bootloader-config.desktop \
  usr/share/applications/BootFlash-usb-installer.desktop \
  usr/share/applications/Puppy-universal-installer.desktop \
  usr/share/applications/Remaster-Puppy-live-CD.desktop \
@@ -946,7 +987,7 @@ if [ "$SDFLAG" != "" ];then
 fi
 
 #130326 script to adjust fonts to suit 96 dpi (puppy used to have 78 dpi)...
-rootfs-complete/usr/sbin/hackfontsize
+[ ! -d rootfs-complete/usr/share/ptheme ] && rootfs-complete/usr/sbin/hackfontsize #don't execute if we have ptheme
 
 #130618 restore the "layer:" lines in /etc/xdg/templates/_root_.jwmrc...
 #note, this file is now in Woof, I took it out of the JWM pet.
@@ -1345,13 +1386,16 @@ cp -a -f 0builtin_files_${DISTRO_FILE_PREFIX}-${DISTRO_VERSION}/root/.packages/b
 echo '...done'
 
 #140615
-echo "Removing redundant aufs-utils..."
-for r in auibusy auplink mount.aufs umount.aufs aufs libau.so* aufs aufs.5 aubrsync aubusy auchk
-do find rootfs-complete/ -type f -name $r -delete
-    echo "deleting $r"
-done
+if [ "$KPET" != "yes" ] ; then
+	echo "Removing redundant aufs-utils..."
+	for r in auibusy auplink mount.aufs umount.aufs aufs libau.so* aufs aufs.5 aubrsync aubusy auchk
+	do find rootfs-complete/ -type f -name $r -delete
+		echo "deleting $r"
+	done
+fi
+
 #140616 remove firmware - in kernel-modules.sfs = $ZDRVSFS
-if [ "$SDFLAG" = "" ] ; then
+if [ "$SDFLAG" = "" -o "$KPET" = "yes" ] ; then
 	echo "Removing redundant firmware as it is in the z drive"
 	rm -rf rootfs-complete/lib/firmware 2>/dev/null
 fi
@@ -1367,6 +1411,7 @@ if [ "$WOOF_HOSTARCH" = "$WOOF_TARGETARCH" ];then #111123
 fi
 
 if [ ! -e rootfs-complete/usr/bin/pango-querymodules ];then #110517 debian squeeze hack
+ [ -x ../packages-${DISTRO_FILE_PREFIX}/pango_DEV/usr/bin/pango-querymodules ] && \
  cp -f ../packages-${DISTRO_FILE_PREFIX}/pango_DEV/usr/bin/pango-querymodules rootfs-complete/usr/bin/
 fi
 
@@ -1376,34 +1421,19 @@ if [ "$WOOF_HOSTARCH" = "$WOOF_TARGETARCH" ];then #111123
  PANGOMODULES="`find rootfs-complete/etc/pango -type f -name pango.modules | sed -e 's%rootfs-complete%%'`"
  [ "$PANGOMODULES" = "" ] && PANGOMODULES='/etc/pango/pango.modules'
  if [ ! -s rootfs-complete${PANGOMODULES} ];then
-  echo "/usr/bin/pango-querymodules > ${PANGOMODULES}"  > rootfs-complete/zz
-  chroot rootfs-complete /bin/ash zz
-  rm -f rootfs-complete/zz
+  if [ -x rootfs-complete/usr/bin/pango-querymodules ];then
+   echo "/usr/bin/pango-querymodules > ${PANGOMODULES}"  > rootfs-complete/zz
+   chroot rootfs-complete /bin/ash zz
+   rm -f rootfs-complete/zz
+  fi
  fi
 fi
 
 #110622 /etc/rc.d/rc.update executes:  gdk-pixbuf-query-loaders > /etc/gtk-2.0/gdk-pixbuf.loaders
 #however, mageia1 requires above file to be at /usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
 #create a symlink...
-VERDIR=''
-if [ -d rootfs-complete/usr/lib${lsuffix}/gdk-pixbuf-2.0 ];then
- [ ! -f rootfs-complete/etc/gtk-2.0/gdk-pixbuf.loaders ] && touch rootfs-complete/etc/gtk-2.0/gdk-pixbuf.loaders
- PIXBUFLOADERSDIR="`find rootfs-complete/usr/lib${lsuffix}/gdk-pixbuf-2.0 -maxdepth 2 -mindepth 2 -type d -name loaders | head -n 1`"
- if [ "$PIXBUFLOADERSDIR" ];then
-  PIXBUFCACHEDIR="`dirname $PIXBUFLOADERSDIR`"
-  VERDIR="`basename $PIXBUFCACHEDIR`" #2.10.0
-  ln -snf ../../../../etc/gtk-2.0/gdk-pixbuf.loaders ${PIXBUFCACHEDIR}/loaders.cache #110903 change -s to -snf
-  #there may be some loaders in wrong place...
-  [ -d rootfs-complete/usr/lib${lsuffix}/gtk-2.0/loaders ] && mv -f rootfs-complete/usr/lib${lsuffix}/gtk-2.0/loaders/*.so ${PIXBUFLOADERSDIR}/ 2>/dev/null
-  if [ -d rootfs-complete/usr/lib${lsuffix}/gtk-2.0/${VERDIR}/loaders ];then
-   mv -f rootfs-complete/usr/lib${lsuffix}/gtk-2.0/${VERDIR}/loaders/*.so ${PIXBUFLOADERSDIR}/ 2>/dev/null
-   rmdir rootfs-complete/usr/lib${lsuffix}/gtk-2.0/${VERDIR}/loaders #111114
-   ln -s ../../gdk-pixbuf-2.0/${VERDIR}/loaders rootfs-complete/usr/lib${lsuffix}/gtk-2.0/${VERDIR}/loaders #111114
-  else #111117
-   ln -s ../../gdk-pixbuf-2.0/${VERDIR}/loaders rootfs-complete/usr/lib${lsuffix}/gtk-2.0/${VERDIR}/loaders
-  fi
- fi
-fi
+#170330 change to native way of updating loader chache: gdk-pixbuf-query-loaders --update-cache
+#see /etc/rc.d/rc.update
 
 #120605 shinobar ref: http://murga-linux.com/puppy/viewtopic.php?t=76961&start=195
 if [ "$WOOF_HOSTARCH" = "$WOOF_TARGETARCH" ];then
@@ -1714,27 +1744,6 @@ else #do it without chroot...
 fi
 
 sync
-
-# Debian builds have executables as shared libraries. ROX gets confused
-if [ "$DISTRO_COMPAT_VERSION" = "stretch" -o "$DISTRO_COMPAT_VERSION" = "ascii" -o "$DISTRO_COMPAT_VERSION" = "xenial" ]; then
-	if [ "$(which elfedit)" ];then
-		/usr/lib/gtkdialog/box_splash -close never -text \
-		"$(gettext 'Fixing file types. please wait...')" &
-		SPID=$!
-		for f in $(find rootfs-complete/ -type f -executable -exec file {} \;| grep -i 'shared object' | cut -f1 -d ':' | grep -E '/bin/|/sbin/')
-		do
-			elfedit --input-type=dyn --output-type=exec $f
-		done
-		sync
-		kill -9 $SPID
-		/usr/lib/gtkdialog/box_splash -timeout 5 -bg green -text \
-		 "$(gettext 'Done! Please check if ROX recognises files correctly.')"
-	else
-		/usr/lib/gtkdialog/box_splash -timeout 10 -bg red -text\
-		 "$(gettext 'Please install elfedit and try later.')"
-	fi
-fi
-
 
 if [ "$BUILD_SFS" = 'yes' ]; then
 	###########
@@ -2148,7 +2157,13 @@ sync
 #think should delete them if they really point nowhere...
 echo " Deleting really invalid symlinks in devx..."
 mkdir layer_top
-mount -t aufs -o udba=reval,diropq=w,dirs=sandbox3/devx=rw:sandbox3/rootfs-complete=ro layerfs layer_top
+if [ "$LAYER_TYPE" = 'overlay' ]; then
+	mkdir overlay_workdir
+	mount -t overlay overlay -olowerdir=sandbox3/rootfs-complete,upperdir=sandbox3/devx,workdir=overlay_workdir layer_top
+else
+	mount -t aufs -o udba=reval,diropq=w,dirs=sandbox3/devx=rw:sandbox3/rootfs-complete=ro layerfs layer_top
+fi
+
 if [ "$WOOF_HOSTARCH" = "$WOOF_TARGETARCH" ] ; then
 	dirs=$(ls -d layer_top/* | sed 's|layer_top||' | grep -vE '/dev/|/proc/|/sys/') #|/initrd/|/tmp/|/var/|/run/|/mnt/
 	chroot layer_top find -L $dirs -type l -delete
@@ -2225,28 +2240,9 @@ do
  [ -f "$EDUPE" ] && echo -n "$ONEDUPE " && rm -f "$ONEDUPE"
 done
 sync
-echo -e "\ncleaning out whiteouts"
-find sandbox3/devx -name '.wh*' -delete
 
-# Debian builds have executables as shared libraries. ROX gets confused
-if [ "$DISTRO_COMPAT_VERSION" = "stretch" -o "$DISTRO_COMPAT_VERSION" = "ascii" -o "$DISTRO_COMPAT_VERSION" = "xenial" ]; then
-	if [ "$(which elfedit)" ];then
-		/usr/lib/gtkdialog/box_splash -close never -text \
-		"$(gettext 'Fixing file types. please wait...')" &
-		SPID=$!
-		for f in $(find sandbox3/devx -type f -executable -exec file {} \;| grep -i 'shared object' | cut -f1 -d ':' | grep -E '/bin/|/sbin/')
-		do
-			elfedit --input-type=dyn --output-type=exec $f
-		done
-		sync
-		kill -9 $SPID
-		/usr/lib/gtkdialog/box_splash -timeout 5 -bg green -text \
-		 "$(gettext 'Done! Please check if ROX recognises files correctly.')"
-	else
-		/usr/lib/gtkdialog/box_splash -timeout 10 -bg red -text\
-		 "$(gettext 'Please install elfedit and try later.')"
-	fi
-fi
+echo -e "\ncleaning out whiteouts"
+clean_out_whiteouts $sandbox3/devx # _00func
 
 echo "Now creating ${DEVXSFS} ..."
 ${MKSQUASHFS} sandbox3/devx ./${WOOF_OUTPUT}/${DEVXSFS} ${SFSCOMP} #100911 110713

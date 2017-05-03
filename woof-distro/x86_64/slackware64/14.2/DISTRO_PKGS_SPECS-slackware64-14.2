@@ -171,12 +171,13 @@ yes|expat|expat|exe,dev,doc,nls
 yes|f2fs-tools||exe,dev,doc
 yes|f2fs-usb-installer||exe| #my new gui to install to f2fs part on usb
 no|faac|faac|exe,dev,doc,nls
-yes|faac||exe,dev,doc,nls
+no|faac||exe,dev,doc,nls
 no|faad2|faad2|exe,dev,doc,nls
 yes|faad2||exe,dev,doc,nls
 no|fbpanel||exe,dev>null,doc,nls
+yes|fdk-aac||exe,dev
 yes|ffconvert||exe
-yes|ffmpeg||exe,dev,doc,nls
+yes|ffmpeg||exe,dev,doc
 yes|file|file|exe,dev,doc,nls
 no|file||exe,dev,doc,nls
 no|file_sharing-curlftpfs-mpscan||exe
@@ -236,6 +237,7 @@ yes|geany||exe,dev,doc,nls
 yes|gecko-mediaplayer||exe,dev>null,doc,nls
 no|gedit||exe
 yes|get_libreoffice||exe
+yes|get_browser||exe
 yes|getcurpos||exe,dev
 no|getdir||exe,dev>null,doc,nls
 yes|gettext|gettext|exe,dev>null,doc>null,nls>null
@@ -391,7 +393,8 @@ yes|less|less|exe,dev>null,doc,nls
 yes|libao|libao|exe,dev,doc,nls
 yes|libarchive|libarchive|exe,dev,doc,nls
 yes|libart|libart_lgpl|exe,dev,doc,nls
-yes|libbluray|libbluray|exe,dev,doc,nls
+no|libbluray|libbluray|exe,dev,doc,nls
+yes|libbluray||exe,dev
 yes|libcap|libcap|exe,dev,doc,nls
 yes|libcap-ng|libcap-ng|exe,dev,doc,nls
 yes|libcddb|libcddb|exe,dev,doc,nls
@@ -464,6 +467,7 @@ yes|libpng|libpng|exe,dev,doc,nls
 no|libpng||exe,dev,doc,nls
 yes|libpthread-stubs|libpthread-stubs|exe>dev,dev,doc,nls
 yes|libraw1394|libraw1394|exe,dev,doc,nls
+no|libreoffice||exe,dev| #if you flip this to yes you MUST install lodeps_boost so flip it to yes too
 yes|librsvg|librsvg|exe,dev,doc,nls
 yes|libsigc++|libsigc++|exe,dev,doc,nls
 no|libsigc++||exe,dev,doc,nls
@@ -490,7 +494,7 @@ yes|libusb-compat|libusb-compat|exe,dev,doc,nls
 no|libusb-compat||exe,dev,doc,nls
 yes|libvorbis|libvorbis|exe,dev,doc,nls
 no|libvpx|libvpx|exe,dev
-yes|libvpx||exe,dev,doc,nls
+yes|libvpx||exe,dev
 no|libwmf|libwmf|exe,dev,doc,nls
 yes|libx86|libx86|exe,dev,doc,nls
 yes|libxcb_base|libxcb|exe,dev,doc,nls
@@ -503,10 +507,12 @@ yes|linux-header|kernel-headers|exe>dev,dev,doc,nls
 no|linuxtv-dvb-apps||exe,dev,doc,nls
 yes|llvm-cut|llvm|exe,dev>null,doc,nls
 no|lmarbles||exe
+no|lodeps_boost||exe
 yes|lvm2|lvm2|exe,dev,doc,nls
 no|lxpanel||exe,dev>null,doc,nls
 no|lzma||exe,dev,doc,nls
 yes|lzo|lzo|exe,dev,doc,nls
+yes|lzop||exe,dev,doc
 yes|m4|m4|exe>dev,dev,doc,nls
 no|madplay|madplay|exe,dev,doc,nls
 yes|make|make|exe>dev,dev,doc,nls
@@ -555,7 +561,7 @@ yes|neon|neon|exe>dev,dev,doc,nls
 yes|netmon_wce||exe,dev,doc,nls
 no|netpbm|netpbm|exe,dev,doc,nls
 yes|netpbm||exe,dev,doc
-yes|net_setup||exe
+no|net_setup||exe
 yes|net-tools|net-tools|exe,dev,doc,nls
 no|network_roxapp||exe
 yes|network_roxapp_samba||exe
@@ -586,7 +592,9 @@ no|opera||exe,nls>null
 yes|orc|orc|exe,dev,doc,nls
 no|orc||exe,dev,doc,nls
 yes|osmo||exe,dev,doc,nls
+yes|osxcart||exe,dev,doc,nls
 yes|p7zip||exe,dev,doc,nls
+no|palemoon||exe,dev
 yes|pango|pango|exe,dev,doc,nls
 yes|pangomm|pangomm|exe,dev,doc,nls
 no|pangomm_static||exe,dev>dev
@@ -639,6 +647,7 @@ no|picocom||exe,dev,doc,nls
 no|picpuz||exe
 no|pictureviewer||exe
 yes|pixman|pixman|exe,dev,doc,nls
+yes|pjproject||exe>dev,dev
 yes|pkgconfig|pkg-config|exe>dev,dev,doc,nls
 no|pmetatagger||exe
 no|pmirc||exe
@@ -665,8 +674,7 @@ yes|prename||exe
 yes|procps-ng|procps-ng|exe
 yes|programchooser||exe
 no|pschedule||exe
-yes|psip||exe
-no|Psip32||exe| #new version
+yes|psip||exe,dev
 no|psmisc||exe,dev>null,doc,nls
 no|pstopwatch||exe
 no|pstreamvid||exe
@@ -682,7 +690,7 @@ yes|pupmd5sum||exe
 no|puppybrowser||exe
 no|puppyinputdetect||exe
 yes|puppy_icon_theme||exe,dev
-no|puppyphone||exe
+yes|puppy_flat_theme||exe,dev
 no|puppy-podcast-grabber||exe
 no|puppyserialdetect||exe
 no|pupradio||exe,nls
@@ -737,6 +745,7 @@ no|samba_tng_client||exe,dev,doc,nls
 no|samba_tng_client_static||exe
 no|sane-backends|sane|exe,dev,doc,nls
 yes|sane-backends||exe,dev,doc,nls
+yes|SaveFolderBackup||exe
 no|scale2x||exe
 no|scanpci||exe
 no|schroedinger|schroedinger|exe,dev,doc,nls
@@ -771,7 +780,7 @@ yes|snap2||exe
 no|sox|sox|exe,dev,doc,nls
 no|soxgui||exe
 no|speex|speex|exe,dev,doc,nls
-yes|speex||exe,dev,doc,nls
+yes|speex||exe,dev,doc
 yes|sqlite|sqlite|exe,dev,doc,nls
 no|squashfs-tools||exe,dev>null,doc,nls
 yes|squashfs-tools4||exe,dev
@@ -819,7 +828,8 @@ no|unclutter||exe,dev>null,doc,nls
 no|unionfs_utils||exe
 no|unrar||exe,dev,doc,nls
 no|unzip||exe,dev,doc,nls
-yes|updates_mgr||exe
+no|updates_mgr||exe
+yes|updates_notice||exe
 yes|usb-modeswitch||exe,dev
 yes|usb-modeswitch-data||exe,dev 
 yes|usbutils||exe,dev,doc,nls
@@ -859,16 +869,16 @@ yes|wvdial||exe,dev,doc,nls
 yes|wvstreams||exe,dev,doc,nls
 yes|x11proto|dri2proto,dri3proto,presentproto,xcmiscproto,compositeproto,xf86miscproto,fontsproto,printproto,renderproto,xf86dgaproto,xproto,dmxproto,glproto,xcb-proto,xf86bigfontproto,bigreqsproto,randrproto,xf86vidmodeproto,resourceproto,xineramaproto,scrnsaverproto,fontcacheproto,kbproto,videoproto,fixesproto,inputproto,xextproto,xf86driproto,damageproto,recordproto|exe>dev,dev,doc,nls
 yes|x264||exe,dev
-no|x264-snapshot||exe,dev
+yes|x265||exe,dev
 yes|xarchive||exe,dev>null,doc,nls
 no|xbindkeys||exe
 yes|xcb-util|xcb-util|exe,dev,doc,nls
 yes|xcb-util-keysyms|xcb-util-keysyms|exe,dev,doc,nls
 no|xchat||exe,dev,nls
-no|xclip||exe,dev,doc,nls
+yes|xclip||exe,dev,doc,nls
 no|xcompmgr|xcompmgr|exe,dev,doc,nls
 no|xcompmgr||exe
-no|xcur2png||exe
+yes|xcur2png||exe,dev,doc
 yes|xdelta||exe,dev
 no|xdg_puppy||exe
 yes|xdg_puppy_jwm||exe
