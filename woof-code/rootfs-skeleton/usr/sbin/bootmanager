@@ -1,58 +1,20 @@
 #!/bin/ash
 #BK 2007, original idea from sunburnt
 #Lesser GPL licence v2 (/usr/share/doc/legal). 2007 www.puppylinux.com
-#/etc/rc.d/BOOTCONFIG has variable EXTRASFSLIST='kde.sfs devx_216.sfs'
-# ...space-delimited list of .sfs files to be loaded.
-# ...must be located at same place as the pup_save file (in /mnt/home)
-#    or at '/' for full hd installation.
-#v2.17
-#/etc/rc.d/MODULESCONFIG has variables PCI_OVERRIDES, SKIPLIST
-#that are read and managed by the BootManager.
-#v4.02 bugfix, modules now .ko.gz.
-#v4.02 /lib/modules/modules.dep.<kernver> no more.
-#v403 yeslist_func, parameters may be added to modules.
-#v411 bugfix, when choose to add more than one module.
-#w478 file prefix 'pup2' got screened out.
-#100125 manage system services at bootup.
-#100221 slight change to a message. 100301 add msg for lameSMBxplorer.
-#100518 fixed showed wrong partition for /mnt/home.
-#100607 kernel 2.6.27.47 has squashfs4.
-#100711 modify to look in both top dir and subdirectory.
-#100831 fix KERNELSUBVER for olpc people, have 'uname -r' returning version with '_'.
-#100913 new simplified puppy filenames.
-#101221 yaf-splash fix.
-#110305 refine code for blacklist module.
-#110422 DISTRO_VERSION variable now has dotted format. note, also now using full dotted version# in puppy filenames.
-#110505 support sudo for non-root user.
-#120201 rodin.s: internationalized.
-#120323 replace 'xmessage' with 'pupmessage'.
-#131126 zigbert: gui (gtkdialog) improvements.
 
-[ "`whoami`" != "root" ] && exec sudo -A ${0} ${@} #110505
+[ "`whoami`" != "root" ] && exec sudo -A ${0} ${@} #support sudo for non-root user.
 
 export TEXTDOMAIN=bootmanager
 export OUTPUT_CHARSET=UTF-8
+export BOOTMANAGER=1
 
 #reentrant.
-#$1='' then run the main window.
-#$1=extrasfs then run the extrasfs_func.
-CLPARAM1="$1"
-CLPARAM2="$2"
-
+CLPARAM1="$1" #$1='' then run the main window.
 MY_SELF="$0"
 CURRDIR="`pwd`"
+KERNVER="`uname -r`"
 . /etc/rc.d/PUPSTATE
 . /etc/DISTRO_SPECS
-KERNVER="`uname -r`"
-
-[ ! -f /etc/rc.d/BOOTCONFIG ] && touch /etc/rc.d/BOOTCONFIG #v424
-. /etc/rc.d/BOOTCONFIG #v424
-
-. /etc/rc.d/MODULESCONFIG
-DEFAULT_SERIAL="false"
-DEFAULT_FAST="false"
-[ "$BYPASSSERIALPROBING" = "yes" ] && DEFAULT_SERIAL="true"
-[ "$FASTBOOTMODULESLIST" != "" ] && DEFAULT_FAST="true"
 
 blacklist_func() {
  #blacklisting of modules at bootup.
@@ -60,12 +22,10 @@ blacklist_func() {
  MODLIST=""
  xSKIPLIST="`echo -n "$SKIPLIST" | tr ' ' '\n' | sort -u | tr '\n' ' ' | tr -s ' '`" #110305
  LOADEDMODULES="`lsmod | grep -v '^Module' | cut -f 1 -d ' ' | sort | tr '\n' ' '`" #110305
- for ONEMOD in $LOADEDMODULES
- do
+ for ONEMOD in $LOADEDMODULES ; do
   MODLIST="$MODLIST $ONEMOD $ONEMOD off"
  done
- for ONEMOD in $xSKIPLIST
- do
+ for ONEMOD in $xSKIPLIST ; do
   MODLIST="$MODLIST $ONEMOD $ONEMOD on"
  done
  EXECME="Xdialog --wmclass \"module16\" --title \"$(gettext 'BootManager: Module blacklist manager')\" --left --stdout --separator \" \" --buildlist \"$(gettext 'On the left pane are modules that are currently loaded.\n
@@ -83,39 +43,22 @@ Note, you need to reboot for any change to take effect.')\" 0 0 8 $MODLIST >/tmp
  sed -i -e "s%^SKIPLIST=.*%SKIPLIST='${SKIPLIST}'%" /etc/rc.d/MODULESCONFIG #110305
 } #end blacklist_func
 
+#---------------------------------------------------------------
+
 yeslist_func() {
  #choose extra modules to load at bootup.
  /usr/lib/gtkdialog/box_splash -close never -text "$(gettext 'Please wait, processing...')" &
  X1PID=$!
  . /etc/rc.d/MODULESCONFIG
  MODLIST=""
-
-old_slow_off_list(){
- #note, lsmod will show all modules with '-' as '_'...
- LOADEDMODULES=" `lsmod | grep -v '^Module' | cut -f 1 -d ' ' | tr '\n' ' '`"
- #v403 handles both .ko and .ko.gz modules...
- ALLMODULES="`cat /lib/modules/$KERNVER/modules.dep | cut -f 1 -d ':' | grep -o '[a-zA-Z0-9_-]*\.ko' | tr '\-' '_' | sort - | tr '\n' ' '`"
- for ONEMOD in $ALLMODULES
- do
-  NAMEONLY="`basename $ONEMOD .ko`"
-  MODPATTERN=" $NAMEONLY "
-  #leave off list if already loaded...
-  [ "`echo "$LOADEDMODULES" | grep "$MODPATTERN"`" != "" ] && continue
-  MODPATTERN=' '"$NAMEONLY"'[ :]'
-  #leave off left pane if already on right pane...
-  [ "`echo "$ADDLIST" | grep "$MODPATTERN"`" != "" ] && continue
-  MODLIST="$MODLIST $NAMEONLY $NAMEONLY off"
-  done
-} #old_slow_off_list
-
-  LOADEDMODULES=`cut -f1 -d' ' /proc/modules`
-  ALLMODULES=`cut -f 1 -d ':' /lib/modules/$KERNVER/modules.dep | grep -o '[a-zA-Z0-9_-]*\.ko' | tr '\-' '_' | sed 's%\.k.*$%%' | sort`
-  ALLMODULES=`echo "$ALLMODULES" | /bin/grep -vw "$LOADEDMODULES"`
-  ADDLIST_MOD_ONLY=`echo "$ADDLIST" | tr ' ' '\n' | sed 's%:.*%%;/^$/d'`
-  ALLMODULES=`echo "$ALLMODULES" | /bin/grep -vw "$ADDLIST_MOD_ONLY"`
-  ALLMODULES=`echo "$ALLMODULES" | sed 's%\(.*\)%& & off%'`
-  MODLIST=`echo "$ALLMODULES" | tr '\n' ' '`
-  #echo "$MODLIST" >&2
+ LOADEDMODULES=`cut -f1 -d' ' /proc/modules`
+ ALLMODULES=`cut -f 1 -d ':' /lib/modules/$KERNVER/modules.dep | grep -o '[a-zA-Z0-9_-]*\.ko' | tr '\-' '_' | sed 's%\.k.*$%%' | sort`
+ ALLMODULES=`echo "$ALLMODULES" | /bin/grep -vw "$LOADEDMODULES"`
+ ADDLIST_MOD_ONLY=`echo "$ADDLIST" | tr ' ' '\n' | sed 's%:.*%%;/^$/d'`
+ ALLMODULES=`echo "$ALLMODULES" | /bin/grep -vw "$ADDLIST_MOD_ONLY"`
+ ALLMODULES=`echo "$ALLMODULES" | sed 's%\(.*\)%& & off%'`
+ MODLIST=`echo "$ALLMODULES" | tr '\n' ' '`
+ #echo "$MODLIST" >&2
  for ONEMOD in $ADDLIST
  do
   NAMEONLY="$ONEMOD"
@@ -143,16 +86,16 @@ old_slow_off_list(){
  [ $? -ne 0 ] && return 1
  ADDLIST="`cat /tmp/modules_addlist_edit_out`"
  ADDLIST=' '"`echo "$ADDLIST" | tr ' ' ':' | tr '\n' ' ' | tr -s ' '`"
- #ADDLIST=" `cat /tmp/yesrettags.txt | tr '\n' ' '`"
  #now update /etc/rc.d/MODULESCONFIG...
  grep -v '^ADDLIST' /etc/rc.d/MODULESCONFIG > /tmp/MODULESCONFIG
  mv -f /tmp/MODULESCONFIG /etc/rc.d/MODULESCONFIG
  echo "ADDLIST='${ADDLIST}'" >> /etc/rc.d/MODULESCONFIG
 } #end yeslist_func
 
-#  \"Sometimes two modules are eligible for the same hardware, and you need to choose\none of them. An example is the rt2500usb and rt73usb wireless networking modules\n-- with some hardware these are both eligible however our experience has been that\nthe rt73usb works better. For such a situation, create a line here, of format\nmodule1:module2, where you want module2 to have preference over module1.\nNote: an alternative approach is to blacklist the rt2500usb module (see main menu)\nhowever that is gross as it always prevents rt2500usb from loading.\"
+#---------------------------------------------------------------
 
 preflist_func() {
+ . /etc/rc.d/MODULESCONFIG
  xPREFLIST="`echo -n "$PREFLIST" | sed -e 's/^ //' | tr ' ' '\n'`"
  echo "$xPREFLIST" > /tmp/bootmanager_preflist
  xxPREFLIST="`Xdialog --backtitle \"$(gettext 'Sometimes two modules are eligible for the same hardware,\n
@@ -165,7 +108,9 @@ and you need to choose one of them. Create a line here,\nof format module1:modul
  fi
 } #end preflist_func
 
-sysdaemons_func() { #100125
+#---------------------------------------------------------------
+
+sysdaemons_func() { #manage system services at bootup.
  osdcnt=0
  echo -n "" > /tmp/bootmanager_osd
  for ONESYSDAEMON in `find /etc/init.d -maxdepth 1 -type f | grep -v -E 'txt|pcmcia|alsa'`
@@ -266,6 +211,8 @@ sysdaemons_func() { #100125
 
 } #end sysdaemons_func
 
+#---------------------------------------------------------------
+
 initlist_func () {
    /usr/lib/gtkdialog/box_ok "$(gettext 'Initmodules: Modules to load in init script')" info "`gettext \"Initmodules allows loading of specific modules early in the boot process, before the full OS is established. Is particularly useful if for example, you have a keyboard that does not work when you need to chose a save file during boot, but is fully functional latter when you get to the Desktop.\"`"
     initmodules &
@@ -295,7 +242,6 @@ fi
 
 #----------------------------------------
 case "$CLPARAM1" in
-	extrasfs)   sfs_load        ; exit ;;
 	blacklist)  blacklist_func  ; exit ;;
 	yeslist)    yeslist_func    ; exit ;;
 	preflist)   preflist_func   ; exit ;;
@@ -304,26 +250,65 @@ case "$CLPARAM1" in
 esac
 #----------------------------------------
 
-if [ -d /initrd ];then #PUPMODE=2, full hd install, will not have this.
-    SFSLOAD_XML="$(gettext "The SFS-Load application will load SFS files immediately. Loaded SFS files will continue to be loaded through subsequent reboots, until they are unloaded.")"
-    SFSFRAME_XML='
-    <frame '$(gettext 'Load SFS files')'>
+generic_xml() {
+    echo '
+    <frame '${XML_FRAME}'>
       <vbox space-expand="true" space-fill="true">
-        '"`/usr/lib/gtkdialog/xml_info scale package_sfs.svg 60 "$(gettext "Puppy has a file named") ${DISTRO_PUPPYSFS} $(gettext "that is always loaded. However, extra SFS files can be loaded at bootup, for example 'kde.sfs' to provide KDE applications, and 'devx.sfs' to provide everything for compiling C/C++ source. These can be thought of as 'combo packs' of many packages in one file.")" " " "${SFSLOAD_XML}"`"'
+        '${XLM_INFO}'
         <vbox space-expand="false" space-fill="false">
           <text height-request="20"><label>""</label></text>
           <hbox>
-            <text><label>'$(gettext 'Choose which extra SFS files to load')'</label></text>
+            <text><label>'${XML_LABEL}'</label></text>
             <button>
-              '"`/usr/lib/gtkdialog/xml_button-icon package_sfs.svg big`"'
-              <action>'"$MY_SELF"' extrasfs &</action>
+              '`/usr/lib/gtkdialog/xml_button-icon ${XML_ICON} big`'
+              <action>'${XML_ACTION}'</action>
             </button>
           </hbox>
           <text height-request="5"><label>""</label></text>
         </vbox>
       </vbox>
     </frame>'
-else
+}
+
+XML_FRAME=$(gettext 'Manage startup apps')
+XLM_INFO="`/usr/lib/gtkdialog/xml_info scale startup_app.svg 60 "$(gettext "Manage what apps are set to start when the graphical server (X) starts on your system. These apps include the notification icons in the system tray and some other hidden services that need the graphical server to be running.")"`"
+XML_ICON=startup_app.svg
+XML_LABEL=$(gettext 'Manage startup apps')
+XML_ACTION='wmstartups'
+STARTUP_XML="$(generic_xml)" #--
+
+XML_FRAME=$(gettext 'Manage system services')
+XLM_INFO="`/usr/lib/gtkdialog/xml_info scale startup_services.svg 60 "$(gettext "These are processes (applications) that are started at bootup and run continuously in the background. On slow PCs it may help to not run some of these.")"`"
+XML_ICON=startup_services.svg
+XML_LABEL=$(gettext 'Choose which system services to run at startup')
+XML_ACTION="$MY_SELF sysdaemons &"
+SERVICES_XML="$(generic_xml)" #--
+
+case $PUPMODE in 5|2) no_underdog=1 ;;
+*)
+	UD_1="$(gettext "The Underdog Distro")"
+	UD_2="$(gettext "At bootup Puppy will read underdog.lnx and will mount the partition as the bottom layer. If that partition happens to have a Linux distro installed in it, then the entire distro filesystem will 'show through' on the top layer of Puppy's unionfs.")"
+	UD_3="$(gettext "It will look like a normal Puppy, same desktop, but everything in the underlying distro is available to be executed. All the applications, compile environment, package manager, etc.")"
+	XML_FRAME=$(gettext 'Underdog')
+	XLM_INFO="`/usr/lib/gtkdialog/xml_info scale puppy.svg 60 "$UD_1" " " "$UD_2" "" "$UD_3"`"
+	XML_ICON=puppy.svg
+	XML_LABEL=$(gettext 'Run underdog gui')
+	XML_ACTION='underdog &'
+	UNDERDOG_XML="$(generic_xml)" #--
+	UNDERDOG_TAB='|'$(gettext 'Underdog')''
+	;;
+esac
+
+PUPSWAP_XML_1="$(gettext "As well as the swap partition, Linux also supports a swap file that you can create, prepare, and mount in a fashion similar to that of a swap partition. The advantage of swap files is that you don't need to find an empty partition or repartition a disk to add additional swap space.")"
+PUPSWAP_XML_2="$(gettext "It is possible to run a Linux system without a swap space, and the system will run well if you have a large amount of memory -- but if you run out of physical memory then the system will crash, as it has nothing else it can do, so it is advisable to have a swap space, especially since disk space is relatively cheap")"
+XML_FRAME=$(gettext 'Swapfile')
+XLM_INFO="`/usr/lib/gtkdialog/xml_info scale execute_add.svg 60 "$PUPSWAP_XML_1" "" "$PUPSWAP_XML_2"`"
+XML_ICON=execute_add.svg
+XML_LABEL=$(gettext 'Run pupswap')
+XML_ACTION='pupswap &'
+SWAPFILE_XML="$(generic_xml)" #--
+
+if [ $PUPMODE -eq 2 ];then #PUPMODE=2, full hd install, will not have this.
     SFSLOAD_XML="$(gettext "SFS_Load application will enable you to install SFS files -- see the 'Setup' menu.")"
     SFSFRAME_XML='
     <frame '$(gettext 'Load SFS files')'>
@@ -331,6 +316,14 @@ else
         '"`/usr/lib/gtkdialog/xml_info scale package_sfs.svg 60 "$(gettext "NOTICE: As this is a full installation of Puppy without an initrd, SFS files cannot be loaded/unloaded at bootup. However, they can be permanently installed.")" " " "${SFSLOAD_XML}"`"'
       </vbox>
     </frame>'
+else
+    SFSLOAD_XML="$(gettext "The SFS-Load application will load SFS files immediately. Loaded SFS files will continue to be loaded through subsequent reboots, until they are unloaded.")"
+	XML_FRAME=$(gettext 'Load SFS files')
+	XLM_INFO=`/usr/lib/gtkdialog/xml_info scale package_sfs.svg 60 "$(gettext "Puppy has a file named") ${DISTRO_PUPPYSFS} $(gettext "that is always loaded. However, extra SFS files can be loaded at bootup, for example 'kde.sfs' to provide KDE applications, and 'devx.sfs' to provide everything for compiling C/C++ source. These can be thought of as 'combo packs' of many packages in one file.")" " " "${SFSLOAD_XML}"`
+	XML_ICON=package_sfs.svg
+	XML_LABEL=$(gettext 'Choose which extra SFS files to load')
+	XML_ACTION='sfs_load &'
+	SFSFRAME_XML="$(generic_xml)" #--
 fi
 
 #######################################################
@@ -338,27 +331,9 @@ fi
 export BootManager='
 <window title="'$(gettext 'Startup  Manager')'" icon-name="gtk-execute">
 <vbox space-expand="true" space-fill="true">
-  <notebook labels="'$(gettext 'Startup Apps')'|'$(gettext 'SFS-packages')'|'$(gettext 'Modules')'|'$(gettext 'Services')'">
-
-    <frame '$(gettext 'Manage startup apps')'>
-      <vbox space-expand="true" space-fill="true">
-        '"`/usr/lib/gtkdialog/xml_info scale startup_app.svg 60 "$(gettext "Manage what apps are set to start when the graphical server (X) starts on your system. These apps include the notification icons in the system tray and some other hidden services that need the graphical server to be running.")"`"'
-        <vbox space-expand="false" space-fill="false">
-          <text height-request="20"><label>""</label></text>
-          <hbox>
-            <text><label>'$(gettext 'Manage startup apps')'</label></text>
-            <button>
-              '"`/usr/lib/gtkdialog/xml_button-icon startup_app.svg big`"'
-              <action>wmstartups</action>
-            </button>
-          </hbox>
-          <text height-request="5"><label>""</label></text>
-        </vbox>
-      </vbox>
-    </frame>
-
-    '"${SFSFRAME_XML}"'
-
+  <notebook labels="'$(gettext 'Startup Apps')'|'$(gettext 'SFS-packages')'|'$(gettext 'Modules')'|'$(gettext 'Services')'|'$(gettext 'Swapfile')${UNDERDOG_TAB}'">
+    '${STARTUP_XML}'
+    '${SFSFRAME_XML}'
     <frame '$(gettext 'Load kernel modules')'>
       <vbox space-expand="true" space-fill="true">
         '"`/usr/lib/gtkdialog/xml_info scale module.svg 60 "$(gettext "If a driver module did not get loaded, or the wrong one got loaded, or you want to 'blacklist' a module, this is the place. A common scenario is a driver got auto-loaded, for say your wireless network card, but you cannot or do not want to use it, and want some other module or want to use Ndiswrapper (to use the Windows driver).")"`"'
@@ -390,23 +365,9 @@ export BootManager='
         </vbox>
       </vbox>
     </frame>
-
-    <frame '$(gettext 'Manage system services')'>
-      <vbox space-expand="true" space-fill="true">
-        '"`/usr/lib/gtkdialog/xml_info scale startup_services.svg 60 "$(gettext "These are processes (applications) that are started at bootup and run continuously in the background. On slow PCs it may help to not run some of these.")"`"'
-        <vbox space-expand="false" space-fill="false">
-          <text height-request="20"><label>""</label></text>
-          <hbox>
-            <text><label>'$(gettext 'Choose which system services to run at startup')'</label></text>
-            <button>
-              '"`/usr/lib/gtkdialog/xml_button-icon startup_services.svg big`"'
-              <action>'"$MY_SELF"' sysdaemons &</action>
-            </button>
-          </hbox>
-          <text height-request="5"><label>""</label></text>
-        </vbox>
-      </vbox>
-    </frame>
+    '${SERVICES_XML}'
+    '${SWAPFILE_XML}'
+    '${UNDERDOG_XML}'
   </notebook>
 
   <hbox height-request="30" space-expand="false" space-fill="false">
@@ -417,10 +378,7 @@ export BootManager='
 
 . /usr/lib/gtkdialog/xml_info gtk #build bg_pixmap for gtk-theme
 RETSTRING="`gtkdialog -p BootManager`"
-
 eval "$RETSTRING"
-
 [ "$EXIT" = "abort" ] && exit
 
-
-###END###
+### END ###

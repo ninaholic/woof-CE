@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #(c) Copyright Barry Kauler Oct. 2011, http://bkhome.org
 #License: Oct. 2011, GPL3 (refer /usr/share/doc/legal)
 #A GUI when start desktop first time, to replace the text-mode dialogs (locale, keyboard-layout, timezone)
@@ -20,7 +20,6 @@
 #111113 upgraded gtk to 2.24.8, fixed slowness. go back to 'combobox'.
 #111113 fix timezone-set cli app.
 #120209 scripts fixdesk and fixmenus translate files to new language (as specified in /usr/share/sss/menu_strings and desk_strings).
-#120209 added call to fixscripts, to translate language in scripts (as specified in /usr/share/sss/script_strings).
 #120213 when locale change, inform if langpack PET needed.
 #120215 offer to translate initrd.
 #120215 rc.country calls 'chooselocale cli quiet', to run localedef without asking any questions or popups.
@@ -68,6 +67,8 @@ export OUTPUT_CHARSET=UTF-8
 . /etc/rc.d/BOOTCONFIG
 . /etc/clock
 . /etc/rc.d/BOOTCONSTRAINED #120714
+
+. /etc/rc.d/functions_x
 
 PARAM1=""
 [ $1 ] && PARAM1="$1"
@@ -854,58 +855,7 @@ if [ "$SET_COUNTRY" ];then
     AKMAP="`basename $AFILE .gz`" #us, fr, br, etc.
     AKMAP="`basename $AKMAP .kmap`" #120627
     AKMAP="`basename $AKMAP .map`" #120627
-    case $AKMAP in
-     us*) ACNTRY="(USA)";;
-     fr*) ACNTRY="(France)";;
-     it*) ACNTRY="(Italy)";;
-     ba*) ACNTRY="(Bashkir)";;
-     be*) ACNTRY="(Belgium)";;
-     bg*) ACNTRY="(Bulgaria)";;
-     br*) ACNTRY="(Brazil)";;
-     by*) ACNTRY="(Byelorussian)";;
-     cf*) ACNTRY="(French-Canadian)";;
-     croat*) ACNTRY="(Croatia)";;
-     cz*) ACNTRY="(Czech)";;
-     de) ACNTRY="(Germany)";;
-     de_*) ACNTRY="(Germany)";;
-     de-*) ACNTRY="(Germany)";;
-     dk*) ACNTRY="(Denmark)";;
-     es*) ACNTRY="(Spain)";;
-     fi*) ACNTRY="(Finland)";;
-     hu*) ACNTRY="(Hungary)";;
-     ka*) ACNTRY="(Kazakhstan)";;
-     ky*) ACNTRY="(Kyrgyzstan)";;
-     et*) ACNTRY="(Estonia)";;
-     lt*) ACNTRY="(Lithuania)";;
-     mk*) ACNTRY="(Macedonia)";;
-     sr*) ACNTRY="(Serbia)";;
-     tr*) ACNTRY="(Turkey)";;
-     tt*) ACNTRY="(Tatar)";;
-     sg*) ACNTRY="(Sango)";;
-     ua*) ACNTRY="(Ukraine)";;
-     gr*) ACNTRY="(Greece)";;
-     il*) ACNTRY="(Israel)";;
-     is*) ACNTRY="(Iceland)";;
-     jp*) ACNTRY="(Japan)";;
-     pc*) ACNTRY="(Japanese/English)";;
-     la*) ACNTRY="(Latin_America)";;
-     nl*) ACNTRY="(Netherlands)";;
-     no*) ACNTRY="(Norway)";;
-     pl*) ACNTRY="(Poland)";;
-     pt*) ACNTRY="(Portugal)";;
-     ro*) ACNTRY="(Romania)";;
-     ru*) ACNTRY="(Russia)";;
-     se*) ACNTRY="(Sweden)";;
-     sv*) ACNTRY="(Sweden)";;
-     sk*) ACNTRY="(Slovakia)";;
-     sl*) ACNTRY="(Slovenia)";;
-     uk*) ACNTRY="(UK)";;
-     wangbe*) ACNTRY="(Belgium)";;
-     azerty) ACNTRY="(Tandon)";;
-     dvorak-r) ACNTRY="(Right_single-handed)";;
-     dvorak-l) ACNTRY="(Left_single-handed)";;
-     *)  ACNTRY="-";;
-    esac
+    ACNTRY=$(keymap_country $AKMAP)
     if [ "$DEF_KMAP" = "$AKMAP" ];then
      echo "$AKMAP \"${ACNTRY}\" on" >> /var/local/quickset-keyboard-list
     else
@@ -1299,7 +1249,6 @@ if [ "$SET_LOCALE" ];then
    #scripts fixdesk and fixmenus translate files to new language (as specified in /usr/share/sss/menu_strings and desk_strings).
    #so need to call them here...
    #note, these are also called in /etc/rc.d/rc.update, and further down.
-   LANG=${NEWLANG} fixscripts
    LANG=${NEWLANG} fixdesk
    LANG=${NEWLANG} fixmenus
    exit
@@ -1424,7 +1373,6 @@ Note: Before downloading the langpack, you will have to make an Internet connect
    #120209 scripts fixdesk and fixmenus translate files to new language (as specified in /usr/share/sss/menu_strings and desk_strings).
    #so need to call them here...
    #note, these are also called in /etc/rc.d/rc.update ...
-   LANG=${LANGCHOICE}${UTF8} fixscripts
    LANG=${LANGCHOICE}${UTF8} fixdesk
    LANG=${LANGCHOICE}${UTF8} fixmenus
    #...no need to refresh screen, as changing locale requires restart of X.

@@ -96,7 +96,7 @@ save_db (){
 	[ ! "$DB" ] && exit
 	echo "$DB_1|$DB_2|$DB_3|$DB_4|$DB_5|$DB_6|$DB_7|$DB_8|$DB_9|$DB_10|$DB_11|$DB_12|$DB_13|$DB_14|$DB_15|$DB_16|$DB_17|$DB_18|$DB_19|$DB_20|$DB_21" > $WORKDIR/tmp_index
 	( flock -e 200
-		grep -v "^${DB_1}|" "$STORAGE_DIR/index_mymusic" >> $WORKDIR/tmp_index
+		grep -av "^${DB_1}|" "$STORAGE_DIR/index_mymusic" >> $WORKDIR/tmp_index
 		mv $WORKDIR/tmp_index "$STORAGE_DIR/index_mymusic"
 	) 200>$WORKDIR/mymusic_db.lockfile 
 }
@@ -107,7 +107,7 @@ delete_db (){
 	. $APPDIR/box_yesno
 	if [ $EXIT = "yes" ]; then
 		( flock -e 200
-			grep -v "^${DB_1}|" "$STORAGE_DIR/index_mymusic" > $WORKDIR/tmp_index
+			grep -av "^${DB_1}|" "$STORAGE_DIR/index_mymusic" > $WORKDIR/tmp_index
 			mv $WORKDIR/tmp_index "$STORAGE_DIR/index_mymusic"
 		) 200>$WORKDIR/mymusic_db.lockfile 
 	fi
@@ -129,8 +129,8 @@ case "$1" in
 	;;
 
 -initialize_gui)
-	LC_ALL=C grep -ciE "$AUDIO_FORMATS2" "$STORAGE_DIR/index_mymusic" > $WORKDIR/index_count_songs
-	LC_ALL=C grep -ciE "\.pmu|\.m3u|\.pls" "$STORAGE_DIR/index_mymusic" > $WORKDIR/index_count_collections
+	LC_ALL=C grep -caiE "$AUDIO_FORMATS2" "$STORAGE_DIR/index_mymusic" > $WORKDIR/index_count_songs
+	LC_ALL=C grep -caiE "\.pmu|\.m3u|\.pls" "$STORAGE_DIR/index_mymusic" > $WORKDIR/index_count_collections
 	echo true > $WORKDIR/UPDATE_INDEX #update gui
 	;;
 
@@ -165,25 +165,25 @@ case "$1" in
 			echo "$2|$ARTIST||$ALBUM||||||||||$2|gtk-audio||||||" > $WORKDIR/index_tmp
 			;;
 		/*)
-			find "$2" -printf "%p|%f|||||||0|||||%p|gtk-audio||||||\n" | grep -iE "$AUDIO_FORMATS2|\.pmu\||\.m3u\||\.pls\|" > $WORKDIR/index_tmp
+			find "$2" -printf "%p|%f|||||||0|||||%p|gtk-audio||||||\n" | grep -iaE "$AUDIO_FORMATS2|\.pmu\||\.m3u\||\.pls\|" > $WORKDIR/index_tmp
 			;;
 		*) #global scan
 			echo -n > $WORKDIR/index_tmp
 			while read I; do
 				[ ! -d "$I" ] && continue
-				nice -n 18 find -P "$I" -path '/initrd' -prune -o -printf "%p|%f|||||||0|||||%p|gtk-audio||||||\n" 2>> $STDERR | grep -iE "$AUDIO_FORMATS2|\.pmu\||\.m3u\||\.pls\|" >> $WORKDIR/index_tmp
+				nice -n 18 find -P "$I" -path '/initrd' -prune -o -printf "%p|%f|||||||0|||||%p|gtk-audio||||||\n" 2>> $STDERR | grep -iaE "$AUDIO_FORMATS2|\.pmu\||\.m3u\||\.pls\|" >> $WORKDIR/index_tmp
 			done < "$STORAGE_DIR/index_directories"
 			;;
 	esac
 	#change icon and remove rating for playlists
-	grep -iE "\.pmu\||\.m3u\||\.pls\|" $WORKDIR/index_tmp | sed -e 's/|0|/||/g' -e 's/gtk-audio/gtk-audio_playlist/g' > $WORKDIR/index_tmp2
+	grep -iaE "\.pmu\||\.m3u\||\.pls\|" $WORKDIR/index_tmp | sed -e 's/|0|/||/g' -e 's/gtk-audio/gtk-audio_playlist/g' > $WORKDIR/index_tmp2
 	( flock -e 200
 		#build new db
 		#merge double additions, keep old entry if exists, full set of trackinfo already in db
 		#but for playlists we override existing (no extended info) since it will update icons from a pmusic-3 db
-		cat "$STORAGE_DIR/index_mymusic" $WORKDIR/index_tmp2 $WORKDIR/index_tmp | awk -F'|' '!a[$1]++' > $WORKDIR/index_tmp3 #Don't sort db. Used tracks will always be most reachable - Overview rating
+		cat "$STORAGE_DIR/index_mymusic" $WORKDIR/index_tmp2 $WORKDIR/index_tmp | LANG=C awk -F'|' '!a[$1]++' > $WORKDIR/index_tmp3 #Don't sort db. Used tracks will always be most reachable - Overview rating
 		#remove streamripper incomplete files and podcasts
-		grep -vF '/incomplete/' $WORKDIR/index_tmp3 | grep -vF "$STORAGE_DIR/podcasts/" > "$STORAGE_DIR"/index_mymusic
+		grep -vaF '/incomplete/' $WORKDIR/index_tmp3 | grep -vaF "$STORAGE_DIR/podcasts/" > "$STORAGE_DIR"/index_mymusic
 	) 200>$WORKDIR/mymusic_db.lockfile
 	;;
 
@@ -205,26 +205,26 @@ case "$1" in
   <vbox space-expand="false" space-fill="false">
    <hbox spacing="0" height="80" scrollable="true" space-expand="true" space-fill="true" vscrollbar-policy="2" hscrollbar-policy="2">
     <eventbox name="svgheading">
-	 <hbox space-expand="true" space-fill="true">
-	  <text width-request="20" space-expand="false" space-fill="false"><label>""</label></text>
-	  <text ypad="55" use-markup="true" wrap="false" space-expand="false" space-fill="false"><label>"<i><b>'$(gettext 'My Music')'</b> '$(gettext 'is a database of music on your system')'</i>"</label></text>
-	  <text space-expand="true" space-fill="true"><label>""</label></text>
+     <hbox space-expand="true" space-fill="true">
+      <text width-request="20" space-expand="false" space-fill="false"><label>""</label></text>
+      <text ypad="55" use-markup="true" wrap="false" space-expand="false" space-fill="false"><label>"<i><b>'$(gettext 'My Music')'</b> '$(gettext 'is a database of music on your system')'</i>"</label></text>
+      <text space-expand="true" space-fill="true"><label>""</label></text>
       <hbox spacing="0" space-expand="false" space-fill="false">
        <vbox>
         <button relief="2" can-focus="false" tooltip-text="'$(gettext 'Backup database (text file)')'" space-expand="false" space-fill="false">
          <input file stock="gtk-save-as"></input>
          <action>backup_db</action>
         </button>
-	    <text space-expand="true" space-fill="true"><label>""</label></text>
-	   </vbox>
+        <text space-expand="true" space-fill="true"><label>""</label></text>
+       </vbox>
        <vbox>
         <button relief="2" can-focus="false" space-expand="false" space-fill="false">
          <input file stock="gtk-help"></input>
          <action>'$0' -help</action>
         </button>
-	    <text space-expand="true" space-fill="true"><label>""</label></text>
-	   </vbox>
-	  </hbox>
+        <text space-expand="true" space-fill="true"><label>""</label></text>
+       </vbox>
+      </hbox>
      </hbox>
     </eventbox>
    </hbox>
@@ -284,7 +284,7 @@ case "$1" in
          <action>if false disable:ALBUMART_LOCAL</action>
          <action>if false disable:PMU_LOCAL</action>
         </checkbox>
-   
+
         <vbox space-expand="false" space-fill="false">
          <hbox space-expand="true" space-fill="true">
           <text space-expand="false" space-fill="false"><label>"  "</label></text>
@@ -357,18 +357,19 @@ case "$1" in
      </button>
     </hbox>
    </vbox>
-   
-   
+
    <vbox>
     <hbox  homogeneous="true" space-expand="true" space-fill="true">
      <vbox space-expand="true" space-fill="true">
       <hbox space-expand="false" space-fill="false">
        <button space-expand="false" space-fill="false">
-        <input file stock="gtk-go-down"></input>
-        <label>'$(gettext 'Show database')'</label>
-        <action>cut -d"|" -f 2,3,4,14,15 "'$STORAGE_DIR'"/index_mymusic > "'$STORAGE_DIR'"/index_mymusic.editor</action>
-        <action>clear:DB</action>
-        <action>refresh:DB</action>
+##      <input file stock="gtk-go-down"></input>
+##      <label>'$(gettext 'Show database')'</label>
+##      <action>cut -d"|" -f 2,3,4,14,15 "'$STORAGE_DIR'"/index_mymusic > "'$STORAGE_DIR'"/index_mymusic.editor</action>
+##      <action>clear:DB</action>
+##      <action>refresh:DB</action>
+        <input file stock="gtk-edit"></input>
+        <action>'$TEXT_EDITOR' "'$STORAGE_DIR'"/index_mymusic &</action>
        </button>
        <entry name="search" height-request="30" activates-default="true" is-focus="true" secondary-icon-stock="gtk-find" space-expand="true" space-fill="true">
         <variable>SEARCH_DB</variable>
@@ -392,7 +393,7 @@ case "$1" in
        </tree>    
       </vbox>
      </vbox>
-    
+
      <vbox space-expand="true" space-fill="true">
       <hbox space-expand="false" space-fill="false">
        <button space-expand="false" space-fill="false">
@@ -433,7 +434,7 @@ case "$1" in
 </window>'
 
 	echo "$S" | sed 's/##.*//' > $WORKDIR/xml_pmusic_mymusic #I use double hash (##) for comments. --> as #FF0000
-	[ $TOOLTIPS = false ] && sed -i 's%tooltip-text%tooltipXXXtext%g' $WORKDIR/xml_pmusic_mymusic
+	[ $TOOLTIPS = false ] && sed -i 's%tooltip-%tooltipXXX%g' $WORKDIR/xml_pmusic_mymusic
 	. $APPDIR/func -reset_gtk
 	I=$IFS; IFS=""
 	for STATEMENTS in  $($GTKDIALOG -f $WORKDIR/xml_pmusic_mymusic); do
@@ -448,17 +449,9 @@ case "$1" in
 	fi
 	;;
 
-
 -add_to_indexlist)
-	GET_OUTDIR="true"; TITLE="- $(gettext 'Index music directory')"; . $APPDIR/box_chooser
-	if [ "$EXIT" = "OK" ]; then
-		if [ ! -d "$CHOOSER" ]; then #dir not found
-			TXT1="<b>$CHOOSER $(gettext 'not found')</b>"
-			. $APPDIR/box_ok
-		else
-			echo "$CHOOSER" >> "$STORAGE_DIR/index_directories"
-		fi
-	fi
+	TITLE="- $(gettext 'Index music directory')"; MODE=2; . $APPDIR/box_chooser
+	[ "$EXIT" = "OK" ] && echo "$CHOOSER" >> "$STORAGE_DIR/index_directories"
 	;;
 
 -remove_from_indexlist)
@@ -476,7 +469,7 @@ case "$1" in
 		#find both changed files and new added files
 		echo -n > $WORKDIR/index_new
 		while read I; do
-			find "$I" -printf "%p\n" | grep -iE "$AUDIO_FORMATS|\.pmu$|\.m3u$|\.pls$" >> $WORKDIR/index_new
+			find "$I" -printf "%p\n" | grep -iaE "$AUDIO_FORMATS|\.pmu$|\.m3u$|\.pls$" >> $WORKDIR/index_new
 		done < "$STORAGE_DIR/index_directories"
 		#check meta tag. file by file
 		DB_NEW=$WORKDIR/tmp_index_mymusic_new
@@ -516,7 +509,6 @@ case "$1" in
 	fi
 
 	cp -f "$STORAGE_DIR/index_mymusic" $WORKDIR/index_mymusic #index is updated and we need to reload
-
 	#fix %20 and _ to spaces in id3-tags (column 2-8)
 	gettext 'Improving syntax' > $WORKDIR/index_splashtext
 	cut -d'|' -f1 $WORKDIR/index_mymusic > $WORKDIR/index_tmp0
@@ -543,7 +535,7 @@ case "$1" in
 
 	#remove streamripper incomplete files, podcast files and duplicated lines
 #	grep -vF '/incomplete/' $WORKDIR/index_mymusic | sort -ust'|' -k1,1 | sort -rnt'|' -k21,21 --output=$WORKDIR/index_mymusic2
-	grep -vF '/incomplete/' $WORKDIR/index_mymusic | grep -vF "$STORAGE_DIR/podcasts/" | awk -F'|' '!a[$1]++' > $WORKDIR/index_mymusic2
+	grep -vaF '/incomplete/' $WORKDIR/index_mymusic | grep -vaF "$STORAGE_DIR/podcasts/" | LANG=C awk -F'|' '!a[$1]++' > $WORKDIR/index_mymusic2
 
 	#reset
 	( flock -e 200
@@ -658,10 +650,10 @@ case "$1" in
 			if [ "`grep -F "$A1" $WORKDIR/merge`" ]; then
 				IFS='|' read A2 B2 C2 D2 E2 F2 G2 H2 I2 J2 K2 L2 M2 N2 O2 P2 Q2 R2 S2 T2 U2 <<< "`grep -Fm1 "$A1" $WORKDIR/merge`"
 			else
-				IFS='|' read A2 B2 C2 D2 E2 F2 G2 H2 I2 J2 K2 L2 M2 N2 O2 P2 Q2 R2 S2 T2 U2 <<< "`grep -Fm1 "$A1" "$STORAGE_DIR/index_mymusic"`"
+				IFS='|' read A2 B2 C2 D2 E2 F2 G2 H2 I2 J2 K2 L2 M2 N2 O2 P2 Q2 R2 S2 T2 U2 <<< "`grep -Fam1 "$A1" "$STORAGE_DIR/index_mymusic"`"
 			fi
 			#remove existing item
-			grep -Fv "$A1" $WORKDIR/merge > $WORKDIR/merge2
+			grep -Fav "$A1" $WORKDIR/merge > $WORKDIR/merge2
 			mv -f $WORKDIR/merge2 $WORKDIR/merge
 			#include new info from stack if exist
 			II="${A1}"
@@ -687,9 +679,10 @@ case "$1" in
 		done < $WORKDIR/mymusic_stack
 		echo -n > $WORKDIR/mymusic_stack
 	) 202>$WORKDIR/mymusic_stack.lockfile
+
 	#remove files in db that is added from stack
 	( flock -e 200
-		cat $WORKDIR/merge "$STORAGE_DIR/index_mymusic" | awk -F'|' '!a[$1]++' > "$STORAGE_DIR/index_mymusic.tmp"
+		cat $WORKDIR/merge "$STORAGE_DIR/index_mymusic" | LANG=C awk -F'|' '!a[$1]++' > "$STORAGE_DIR/index_mymusic.tmp"
 		mv -f "$STORAGE_DIR/index_mymusic.tmp" "$STORAGE_DIR/index_mymusic"
 	) 200>$WORKDIR/mymusic_db.lockfile
 	;;

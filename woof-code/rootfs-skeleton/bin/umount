@@ -13,7 +13,7 @@
 
 #sync #paranoid precaution. v2.12 kernel call to modprobe, sync hangs.
 
-. /etc/rc.d/functions4puppy4 #v4.02
+. /usr/local/pup_event/frontend_funcs #rox
 
 #v406 add /dev/hd* support... v407 add fd*...
 MNTDDEVS1="`busybox mount | grep '^/dev/[smhf]' | cut -f 1 -d ' ' | cut -f 3 -d '/'`" #v403 sd, sr, mmc
@@ -56,7 +56,7 @@ else
 fi
 
 #v403 if there is a desktop icon (see pup_eventd), then refresh it...
-if [ $RETVAL -eq 0 ];then
+if [ $RETVAL -eq 0 -a "$(pidof ROX-Filer)" != "" ];then
  #find which device has been unmounted... v406 add hd*... v407 add fd*...
  MNTDDEVS2="`busybox mount | grep '^/dev/[smhf]' | cut -f 1 -d ' ' | cut -f 3 -d '/'`" #v403 sd, sr, mmc
  if [ "$MNTDDEVS2" = "" ];then
@@ -72,15 +72,7 @@ ${MNTDDEVS2}" | sort | uniq -u | head -n 1`" #head is a precaution.
   xDRVNAME="$DRVNAME" #v404
   [ -d /root/.pup_event/drive_${DEVNAME} ] && DRVNAME="$DEVNAME" #icon for each partition. ex: DRVNAME=sda1
   if [ -d /root/.pup_event/drive_${DRVNAME} ];then
-   case $DRVNAME in #v407
-    fd*)
-     DRV_CATEGORY="floppy"
-    ;;
-    *)
-     dnPATTERN='/dev/'"${xDRVNAME}"'|'
-     DRV_CATEGORY="`probedisk | grep "$dnPATTERN" | cut -f 2 -d '|'`"
-    ;;
-   esac
+   DRV_CATEGORY="`probedisk /dev/${xDRVNAME} | cut -f 2 -d '|'`"
    #if any partitions still mounted, leave "MNTD" on icon...
    drvPATTERN='^/dev/'"${DRVNAME}" #important, no space on end.
    #120104 a bug if more than 9 partitions in drive, ex DRVNAME=sda1 xDRVNAME=sda, df test below must ignore sda10 etc...
@@ -90,10 +82,10 @@ ${MNTDDEVS2}" | sort | uniq -u | head -n 1`" #head is a precaution.
    if [ "`df | tr -s ' ' | cut -f 1,6 -d ' ' | grep "$drvPATTERN" | grep -v ' /initrd/' | grep -v ' /$'`" = "" ];then
     if [ "`df | tr -s ' ' | cut -f 1,6 -d ' ' | grep "$drvPATTERN" | grep -E ' /initrd/| /$'`" != "" ];then
      #only a partition left mntd that is in use by puppy, change green->yellow...
-     icon_mounted_func $DRVNAME $DRV_CATEGORY #see functions4puppy4
+     icon_mounted_func $DRVNAME $DRV_CATEGORY #see frontend_funcs
     else
      #redraw icon without "MNTD" text...
-     icon_unmounted_func $DRVNAME $DRV_CATEGORY #see functions4puppy4
+     icon_unmounted_func $DRVNAME $DRV_CATEGORY #see frontend_funcs
     fi
    fi
   fi

@@ -1,8 +1,12 @@
 #!/bin/sh
+# see also /sbin scripts: usablefs, set_plang, wait4usb, switch
+#
+# _FN = _FILENAME
+# _MP = _MOUNTPOINT
+#
 
 #Aufs layers setup by this script...
 #aufs layers:            RW (top)      RO1             RO2              PUPMODE
-#full install, flash drive: tmpfs         PDEV1                            3
 #First boot (or pfix=ram):  tmpfs                         pup_xxx.sfs      5
 #pup_save is a partition:   PDEV1                         pup_xxx.sfs      6
 #ditto, but flash drive:    tmpfs         PDEV1           pup_xxx.sfs      7
@@ -22,7 +26,8 @@ L_PAUSING_60_SECONDS="Pausing for 60 seconds..."
 L_LOADING_FILE="Loading the '%s' %s file..." #printf
 L_CANNOT_RESIZE_PUPSAVE="SORRY, cannot resize %s" #printf
 L_INCREASING_PUPSAVE='Increasing %s by %s Kbytes, please wait...' #printf
-L_LOADING_PUPSAVE='Loading personal storage %s (%s)...' #printf
+L_LOADING_PUPSAVE='Loading savefolder %s [%s]...' #printf
+L_LOADING_PUPSAVE_FILE='Loading savefile %s [%s] (%s)...' #printf
 L_UPGRADE_MSG_1="This personal storage was last used with version %s of Puppy." #printf
 L_UPGRADE_MSG_2="Hit the ENTER key only if it is okay to upgrade this file, or to not use it and boot up in RAM only type any other printable character."
 L_UPGRADE_MSG_3="ENTER only to upgrade: "
@@ -48,28 +53,33 @@ L_FOLDER_MARKED_BAD="Folder %s marked bad." #printf
 L_0_NONE="0  none"
 L_ERROR_FAILED_AUFS_STACK='Failed to create empty aufs stack'
 L_ADDING_MODULE="Adding module %s" #printf
+L_NO_DISTRO_SPECS="No DISTRO_SPECS file found, assuming that personal storage is empty."
+L_DEBUG_SAVE="To save debug info to a partition, type 'debugsave'"
+L_PASSWORD="Password:"
+L_PASSWORD_MSG_1="NOTICE: As you type your password nothing will be displayed on the screen."
+L_PASSWORD_MSG_2="This is a security measure. Just type it in then press ENTER key..."
+L_SFFS_ERROR="ERROR: savefile filesystem is not ext2/3/4"
+
 ##############################################################
 
-if [ "$(ls /proc)" = "" ]; then
- mount -t proc none /proc
- mount -t sysfs none /sys
- mount -t rootfs -o remount,rw rootfs /
- ln -s /proc/mounts /etc/mtab
-fi
+/sbin/usablefs # mount: /proc /sys /dev / (proc sysfs devtmpfs rootfs)
 
 export TERM="xterm"
 export TERMINFO="/usr/share/terminfo"
-
-export LANG=C #w004
-. /DISTRO_SPECS #v412 has DISTRO_VERSION, DISTRO_FILE_PREFIX
-[ ! "$DISTRO_DB_SUBNAME" ] && DISTRO_DB_SUBNAME="$DISTRO_COMPAT_VERSION" #121102 fallback if DISTRO_DB_SUBNAME not defined in file DISTRO_SPECS.
-
+export LANG=C
 PATH="/bin:/sbin"
-KERNELVER="$(uname -r)"
+export KERNELVER="$(uname -r)"
+VFAT_OUT_PARAM='shortname=mixed,quiet,utf8' #see also /sbin/set_plang
+. /DISTRO_SPECS #v412 has DISTRO_VERSION, DISTRO_FILE_PREFIX
 
-mount -t devtmpfs devtmpfs /dev # always use DEVTMPFS
+#precaution - if DISTRO_SPECS was not processed by 3builddistro...
+[ ! "$DISTRO_ZDRVSFS" ] && DISTRO_ZDRVSFS="zdrv_${DISTRO_FILE_PREFIX}_${DISTRO_VERSION}.sfs"
+[ ! "$DISTRO_FDRVSFS" ] && DISTRO_FDRVSFS="fdrv_${DISTRO_FILE_PREFIX}_${DISTRO_VERSION}.sfs"
+[ ! "$DISTRO_ADRVSFS" ] && DISTRO_ADRVSFS="adrv_${DISTRO_FILE_PREFIX}_${DISTRO_VERSION}.sfs"
+[ ! "$DISTRO_YDRVSFS" ] && DISTRO_YDRVSFS="adrv_${DISTRO_FILE_PREFIX}_${DISTRO_VERSION}.sfs"
+[ ! "$DISTRO_PUPPYSFS" ] && DISTRO_PUPPYSFS="puppy_${DISTRO_FILE_PREFIX}_${DISTRO_VERSION}.sfs"
 
-#100911 simple filenames specified in DISTRO_SPECS: DISTRO_ZDRVSFS, DISTRO_PUPPYSFS...
+# filenames specified in DISTRO_SPECS: DISTRO_ZDRVSFS, DISTRO_PUPPYSFS...
 Z_DEF_FN="$DISTRO_ZDRVSFS"
 F_DEF_FN="$DISTRO_FDRVSFS"
 A_DEF_FN="$DISTRO_ADRVSFS"
@@ -78,25 +88,35 @@ P_DEF_FN="$DISTRO_PUPPYSFS"
 
 [ $loglevel ] && LOGLEVEL=$loglevel #v2.22
 
-fsck_ext() {
+#=============================================================
+#                        FUNCTIONS
+#=============================================================
+
+fsck_func() {
 # "$1" - partition device - ex: /dev/sdb2
 # "$2" - fstype - ex: ext2
  case $2 in
-  ext2|ext3|ext4)
-   if [ "$(echo "$FSCKDPARTS" | grep "${1}")" = "" ];then
-    e2fsck -y ${1} > /dev/console 2>&1
-    FSCKDPARTS="${FSCKDPARTS}${1} "
-   fi
-  ;;
+  ext2|ext3|ext4) fsck_app='e2fsck' ; fsck_OPT='-y' ;;
+  vfat|msdos) fsck_app='fsck.fat' ; fsck_OPT='-y' ;;
+  exfat) fsck_app='exfatfsck' ; fsck_OPT='' ;;
+  *) return ;;
  esac
+ which "${fsck_app}" || {
+   echo "WARNING: '${fsck_app}' not found"
+   FSCKDPARTS="${FSCKDPARTS}${1}|"
+   return
+ }
+ if [ "$(echo "$FSCKDPARTS" | grep "${1}|")" = "" ];then
+  ${fsck_app} ${fsck_OPT} ${1} > /dev/console 2>&1 || sleep 3 #so the user has time to read the error msg..
+  FSCKDPARTS="${FSCKDPARTS}${1}|"
+ fi
 }
 
 mntfunc() {
  MNT_T="$1"    #ex: vfat
  MNT_DEV="$2"  #ex: /dev/sda1
  MNT_DIR="$3"  #ex: /mnt/sda1
- MNT_O=""
- [ $4 ] && MNT_O="${4}" #ex: noatime
+ MNT_O="$4"    #ex: noatime   [optional]
  MNT_DSK="${MNT_DEV:5:3}"
  if [ "$PTRIM" = "yes" -a "$MNT_DSK" != "" -a "$(cat /sys/block/$MNT_DSK/queue/rotational)" = "0" ];then
   if [ "$MNT_T" = "ext4" -o "$MNT_T" = "f2fs" ];then
@@ -107,25 +127,22 @@ mntfunc() {
    fi
   fi
  fi
+ [ "$PFSCKP" = "yes" ] && fsck_func "$MNT_DEV" "$MNT_T"
  case $MNT_T in
   ntfs)
    ntfs-3g $MNT_DEV $MNT_DIR -o umask=0,no_def_opts,noatime,rw,silent 2>/dev/null #default is rw. 130211 add silent.
    ntfsRETVAL=$?
    [ $ntfsRETVAL -eq 0 ] && return 0
    if [ $ntfsRETVAL -eq 14 ];then
-    echo -e "\\033[1;31m" >/dev/console #31=red
-    echo -n "${L_WINDOWS_HIBERNATED}" > /dev/console
-    echo -e "\\033[0;39m" >/dev/console
+    echo -e "\\033[1;31m${L_WINDOWS_HIBERNATED}\\033[0;39m" >/dev/console #31=red
     return 14
    else
     ntfs-3g $MNT_DEV $MNT_DIR -o umask=0,no_def_opts,noatime,rw,force,silent 2>/dev/null #130211 add silent.
    fi
   ;;
-  vfat)
-   mount -t $MNT_T -o $VFAT_OUT_PARAM $MNT_DEV $MNT_DIR
-  ;;
+  vfat)  mount -t $MNT_T -o $VFAT_OUT_PARAM $MNT_DEV $MNT_DIR ;;
+  exfat) mount.exfat-fuse $MNT_DEV $MNT_DIR ;;
   *)
-   [ "$PFSCKP" = "yes" ] && fsck_ext "$MNT_DEV" "$MNT_T"
    if [ "$MNT_O" = "" ];then
     mount -t $MNT_T $MNT_DEV $MNT_DIR
    else
@@ -145,23 +162,15 @@ check_status() #args: [-critical] $RET_VAL "$ERROR_MSG"
   ERROR_MSG="$@"
   if [ $RET_VAL -eq 0 ] ; then
     echo -en "\\033[74G" >/dev/console #move to column 72. 110426: 74
-    echo -en "\\033[1;32m" >/dev/console
-    echo -en "${L_DONE}" >/dev/console
-    echo -e "\\033[0;39m" >/dev/console
+    echo -e "\\033[1;32m${L_DONE}\\033[0;39m" >/dev/console #32=green
   else
-    echo -en "\\033[72G" >/dev/console #110426 move to column 72.
-    echo -en "\\033[1;31m" >/dev/console
-    echo -en "${L_FAILED}" >/dev/console
-    echo -e "\\033[0;39m" >/dev/console
-    echo -en "\\033[1;35m" >/dev/console #35=purple
-    echo -n "${L_DUMPING_BOOTINIT_LOG}" >/dev/console
-    echo -e "\\033[0;39m" >/dev/console
+    echo -en "\\033[72G" >/dev/console #move to column 72.
+    echo -e "\\033[1;31m${L_FAILED}\\033[0;39m" >/dev/console #31=red
+    echo -e "\\033[1;35m${L_DUMPING_BOOTINIT_LOG}\\033[0;39m" >/dev/console #35=purple
     echo -en "\\033[1;31m" >/dev/console #31=red
     cat /tmp/bootinit.log | tail -n 4 >/dev/console
     echo -en "\\033[0;39m" >/dev/console
-    echo -en "\\033[1;35m" >/dev/console #35=purple
-    echo -n "${L_DUMPING_KERNEL_LOG}" >/dev/console
-    echo -e "\\033[0;39m" >/dev/console
+    echo -e "\\033[1;35m${L_DUMPING_KERNEL_LOG}\\033[0;39m" >/dev/console #35=purple
     echo -en "\\033[1;31m" >/dev/console #31=red
     dmesg | tail -n 4 >/dev/console
     echo -en "\\033[0;39m" >/dev/console
@@ -172,6 +181,7 @@ check_status() #args: [-critical] $RET_VAL "$ERROR_MSG"
       [ "$ERROR_MSG" != "" ] && echo "*** $ERROR_MSG" >/dev/console
       echo "*** ${L_ERROR_IS_TOO_CRITICAL}" >/dev/console
       echo -en "\\033[0;39m" >/dev/console
+      echo -e "\\033[1;32m*** $L_DEBUG_SAVE\\033[0;39m" >/dev/console
       exec /bin/sh >/dev/console 2>&1
     else
       echo "${L_PAUSING_60_SECONDS}" >/dev/console
@@ -181,12 +191,19 @@ check_status() #args: [-critical] $RET_VAL "$ERROR_MSG"
 }
 
 decode_spec() {
+ #${1} = an sfs spec e.g. sdb2:/pup/test_it.sfs
  ONE_BP_ID=""; ONE_BP_FN=""
  [ "${1}" ] || return
- ONE_BP_ID="$(echo "$1" | cut -f 1 -d ':')"
- ONE_BP_FN="$(echo "$1" | cut -f 2 -d ':')"
- [ "$ONE_BP_FN" = "$ONE_BP_ID" ] && ONE_BP_FN=""
- [ "$ONE_BP_FN" ] && [ "${ONE_BP_FN:0:1}" != "/" ] && ONE_BP_FN="$PSUBDIR/$ONE_BP_FN"
+ case "${1}" in
+  *:*) ONE_BP_ID="${1%%:*}"; ONE_BP_FN="${1#*:}" ;;
+  *) ONE_BP_ID="${1}" ;;
+ esac
+ if [ "$ONE_BP_FN" ];then
+  case "$ONE_BP_FN" in
+   */*) [ "${ONE_BP_FN:0:1}" != "/" ] && ONE_BP_FN="/$ONE_BP_FN" ;;
+   *) ONE_BP_FN="$PSUBDIR/$ONE_BP_FN" ;;
+  esac
+ fi
 }
 
 decode_id() {
@@ -196,7 +213,7 @@ decode_id() {
   ONE_PART="$1"  #is a real partition
  else
   [ "$BLKIDOUT" ] || BLKIDOUT="$(blkid)"
-  ONE_PART="$(echo "$BLKIDOUT" | grep -m1 -E "LABEL=.${1}|UUID=.${1}" | cut -f1 -d: | cut -f3 -d/)" #is LABEL or UUID
+  ONE_PART="$(echo "$BLKIDOUT" | grep -m1 -E " LABEL=.${1}| UUID=.${1}" | cut -f1 -d: | cut -f3 -d/)" #is LABEL or UUID
  fi
 }
 
@@ -224,17 +241,51 @@ ensure_mounted() {
 # "$2" - mountpoint - ex: /mnt/pdrv
  ONE_MP="$(mount | grep -m1 "/dev/${1} " | cut -f 3 -d ' ')"
  [ "$ONE_MP" ] && return
- ONE_FS="$(echo "$HAVE_PARTS" | grep -m1 "${1}" | cut -f 2 -d '|')"
+ ONE_FS="$(echo "$HAVE_PARTS" | grep -m1 "${1}|" | cut -f 2 -d '|')"
  ONE_MP="${2}"
  [ -d "$ONE_MP" ] || mkdir -p $ONE_MP
  mntfunc $ONE_FS /dev/${1} $ONE_MP #-t $ONE_FS /dev/$ONE_PART $ONE_MP
- [ $? -eq 0 ] || { echo "${1} on $ONE_MP as $ONE_FS mount failed."; ONE_MP=""; }
+ if [ $? -ne 0 ] ; then
+  sleep 3 # usb optical drive showing as /sys/block/sr0, but won't mount, needs more delay...
+  mntfunc $ONE_FS /dev/${1} $ONE_MP
+  [ $? -ne 0 ] && { echo "${1} on $ONE_MP as $ONE_FS mount failed."; ONE_MP=""; return 1; }
+ fi
+ # fsckme.flg is created by rc.sysinit and deleted by rc.shutdown
+ # this flag will be set for any prior improper shutdown. if have lots of installations
+ # of puppy on the pc, the flag may not even be for this install of puppy, however, this is
+ # the simplest implementation...
+ if [ -f ${ONE_MP}/fsckme.flg ] ; then
+  #sda1,ext3,/PUPPYBOOT/precise/precisesave.4fs
+  FSCKME="`cat ${ONE_MP}/fsckme.flg`"
+  echo -e "${ONE_MP}/fsckme.flg\n  $FSCKME"
+  FSCK_PART="$(echo "$FSCKME" | cut -f 1 -d ",")"
+  FSCK_EXT="$(echo "$FSCKME" | cut -f 2 -d ",")"
+  FSCK_SAVEFILE="$(echo "$FSCKME" | cut -f 3 -d ",")"
+  rm -f ${ONE_MP}/fsckme.flg
+  [ "$FSCK_SAVEFILE" ] && PFSCK="yes"
+  [ "$PFSCKP" = "yes" ] && return # boot param, partition already fsck'ed
+  case ${FSCK_EXT} in ext2|ext3|ext4|vfat|msdos|exfat)
+    umount ${ONE_MP}
+    [ "$FSCKME" ] && fsck_func /dev/${FSCK_PART} ${FSCK_EXT}
+    ensure_mounted "$1" "$2" ;;
+  esac
+ fi
 }
 
 ensure_save_mounted() {
+ SAVE_MP="/mnt/dev_save"
  ensure_mounted "$SAVEPART" "$SAVE_MP"
- SAVE_MP="$ONE_MP"
- [ "$SAVE_MP" ] && SAVE_FS="$ONE_FS"
+ if [ "$ONE_MP" ];then
+  if [ "$ONE_MP" != "$SAVE_MP" ];then
+   #ensure SAVEPART is mounted on /mnt/dev_save
+   [ -d "$SAVE_MP" ] || mkdir -p $SAVE_MP
+   echo "mount -o move $ONE_MP $SAVE_MP" #debug
+   mount -o move $ONE_MP $SAVE_MP
+  fi
+  SAVE_FS="$ONE_FS"
+ else
+  SAVE_MP=""
+ fi
 }
 
 find_drv_file() {
@@ -244,6 +295,7 @@ find_drv_file() {
  [ "${1}" ] || [ "${2}" ] || return
  if [ "${1}" ];then
   ONE_TRY_FN="${1}"
+  [ "${ONE_TRY_FN:$((${#ONE_TRY_FN} - 1))}" = "/" ] && ONE_TRY_FN="${ONE_TRY_FN}${2}" #last char
  else
   ONE_TRY_FN="${PSUBDIR}/${2}"
  fi
@@ -299,7 +351,8 @@ load_sfs_file() {
    if [ "$ONE_MP" = "" ];then #101101 humongous initrd.
     mv -af $ONE_FN /mnt/tmpfs/
    else
-    [ "$LOADMSG" ] && [ "$COPYMSG" ] && echo -e -n " \\033[1;35m${COPYMSG}\\033[0;39m" > /dev/console #purple.
+    [ "$LOADMSG" ] && [ "$COPYMSG" ] && echo -en " \\033[1;35m${COPYMSG}\\033[0;39m" > /dev/console #purple.
+    TOTAL_SIZEK_SFS_RAM=$(($TOTAL_SIZEK_SFS_RAM + $SIZEZK))
     cp -af $ONE_FN /mnt/tmpfs/
    fi
    sync
@@ -352,9 +405,11 @@ setup_onepupdrv() {
  load_sfs_file
  [ "$ONE_LAYER" ] || return 4 #sfs mount failed
  if [ "$ONE_PREP" ];then
+  echo "mount -o remount,add:1:$ONE_LAYER /pup_new" #debug
   mount -o remount,add:1:$ONE_LAYER /pup_new
   [ $? -eq 0 ] || return 5
  else
+  echo "mount -o remount,append:$ONE_LAYER /pup_new" #debug
   mount -o remount,append:$ONE_LAYER /pup_new
   [ $? -eq 0 ] || return 5
  fi
@@ -362,227 +417,333 @@ setup_onepupdrv() {
  return 0
 }
 
-resize_ext_file() {
- . $RESIZE_FN
- [ "$PUPSAVEFILEX" = "$SAVE_REL_FN" ] || return
- if [ ! -e /bin/e2fsck ];then
-  echo -en "\\033[1;31m" > /dev/console
-  echo -n "$(printf "${L_CANNOT_RESIZE_PUPSAVE}" "$PUPSAVEFILEX")" > /dev/console #31=red
-  echo -en "\\033[0;39m" > /dev/console
-  rm -f $RESIZE_FN
+format_bytes() {
+ [ $1 ] || return
+ if [ $1 -gt 1073741824 ] ; then #GB
+  SIZEX="`dc $1 1073741824 \/ p`"
+  SIZEX="`printf "%.1f" $SIZEX`"
+  SIZEX="${SIZEX%.0}G"
  else
-  SAVE_SZ_FN="$SAVE_FN"
-  rm -f $RESIZE_FN
-  echo > /dev/console
-  echo -n "$(printf "${L_INCREASING_PUPSAVE}" "$PUPSAVEFILEX" "$KILOBIG")" >/dev/console
-  dd if=/dev/zero bs=1024 count=$KILOBIG >> $SAVE_SZ_FN #131225 
-  sync
+  SIZEX="$(($1/1048576))M"
  fi
+ echo ${SIZEX}
 }
 
-resize_ext_fs() {
- fsck_ext ${1} ${2}
- resize2fs -pf ${1} #no size, will fill all of file.
- sync
- check_status 0 #note, e2fsck gives an error even though it works. v2.21 maybe okay now.
- echo -n "$(printf "${L_CONTINUING_LOADING}" "$PUPSAVEFILE")" > /dev/console
-}
 
-mnt_enc_pupsave_func() {
- echo >/dev/console
- echo "NOTICE: As you type your password nothing will be displayed on the screen."  >/dev/console
- echo "This is a security measure. Just type it in then press ENTER key..." >/dev/console
- echo -e "\\033[1;36m" >/dev/console #aqua-blue
- echo -n "Password: " >/dev/console
- echo -en "\\033[0;39m" >/dev/console
- read -s MYPASS
- echo "$MYPASS" | losetup -p 0 $CRYPTO $ONE_LOOP $SAVE_FN
-}
-
-load_ext_file() {
+load_ext_file() { #ex: stretchsave.4fs
  SAVE_SZ_FN=""
  RESIZE_FN="$(dirname $SAVE_FN)/pupsaveresizenew.txt"
-#delete following line when resize file location is fixed
- [ -f "$RESIZE_FN" ] || RESIZE_FN="$SAVE_MP/pupsaveresizenew.txt"
- [ -f "$RESIZE_FN" ] && resize_ext_file
- ONE_LOOP="$(losetup -f)"
- #is the ${DISTRO_FILE_PREFIX}save encrypted?...
- if [ ! "$(echo "$SAVE_FN" | grep '_crypt')" = "" ];then
-  case $SAVE_FN in 
-   *cryptx*) CRYPTO='-e 1' ;;
-   *) CRYPTO='-e aes' ;;
-  esac
-  mnt_enc_pupsave_func
- else
-  losetup $ONE_LOOP $SAVE_FN
+ #delete following line when resize file location is fixed
+ [ -f "$RESIZE_FN" ] || RESIZE_FN="${SAVE_MP}/pupsaveresizenew.txt"
+ #-- resize savefile?.. see /usr/sbin/resizepfile.sh
+ if [ -f "$RESIZE_FN" ] ; then
+   #(1) resize extX file. see below (2)
+   . $RESIZE_FN #$PUPSAVEFILEX $KILOBIG
+   if [ "$PUPSAVEFILEX" = "$SAVE_REL_FN" ] ; then
+    if [ ! -e /bin/resize2fs ];then
+     echo -en "\\033[1;31m" > /dev/console
+     echo -n "$(printf "${L_CANNOT_RESIZE_PUPSAVE}" "$PUPSAVEFILEX")" > /dev/console #31=red
+     echo -en "\\033[0;39m" > /dev/console
+     rm -f $RESIZE_FN
+    else
+     SAVE_SZ_FN="$SAVE_FN"
+     rm -f $RESIZE_FN
+     echo > /dev/console
+     echo -n "$(printf "${L_INCREASING_PUPSAVE}" "$PUPSAVEFILEX" "$KILOBIG")" >/dev/console
+     dd if=/dev/zero bs=1024 count=$KILOBIG >> $SAVE_SZ_FN
+     sync
+    fi
+   fi
  fi
- SFFS='ext'$(echo -n "$SAVE_FN" | rev | cut -c 3)
- [ "$PFSCK" = "yes" ] && { echo "" > /dev/console; fsck_ext "$ONE_LOOP" "$SFFS"; }
- [ "$SAVE_SZ_FN" ] && resize_ext_fs "$ONE_LOOP" "$SFFS"
+ #--
+ ONE_LOOP="$(losetup -f)"
+ # is the ${DISTRO_FILE_PREFIX}save encrypted?...
+ SFFS=$(blkid "$SAVE_FN" | grep -o ' TYPE=".*' | cut -f 2 -d '"')
+ if echo "$SAVE_FN" | grep -q '_crypt' ; then
+   echo "cryptoloop encryption detected"
+   ENCRYPTED=yes
+   ENCTYPE=cryptoloop
+   case $SAVE_FN in 
+     *cryptx*) CRYPTO='-e 1' ;;
+     *) CRYPTO='-e aes' ;;
+   esac
+ fi
+ if [ "$SFFS" = "crypto_LUKS" ] ; then
+   echo "LUKS encryption detected"
+   ln -sv /pup_new/lib/modules/${KERNELVER} /lib/modules/${KERNELVER}
+   modprobe dm-crypt
+   modprobe xts
+   ENCRYPTED=yes
+   ENCTYPE=luks 
+ fi
+ #-- 
+ if [ "$ENCRYPTED" = "yes" ] ; then
+   #mount encrypted savefile
+   echo >/dev/console
+   echo "${L_PASSWORD_MSG_1}"  >/dev/console
+   echo "${L_PASSWORD_MSG_2}" >/dev/console
+   echo -e "\\033[1;36m" >/dev/console #aqua-blue
+   echo -n "${L_PASSWORD} " >/dev/console
+   echo -en "\\033[0;39m" >/dev/console
+   read -s MYPASS
+   if [ "$ENCTYPE" = "luks" ] ; then
+     losetup $ONE_LOOP $SAVE_FN
+     echo -n "$MYPASS" | cryptsetup luksOpen -v $ONE_LOOP savefile -
+     ONE_LOOP_PREV=$ONE_LOOP
+     ONE_LOOP=/dev/mapper/savefile #hack
+   else
+     echo "$MYPASS" | losetup-222 -p 0 $CRYPTO $ONE_LOOP $SAVE_FN
+   fi
+ else
+   losetup $ONE_LOOP $SAVE_FN
+ fi
+ #--
+ case $SFFS in #savefile filesystem
+   ext2|ext3|ext4) ok=1 ;;
+   *) # might be encrypted - unrecognizable..
+     case "$SAVE_FN" in #savefile can have any extension/name. but must one of these strings
+       *".2fs"*) SFFS=ext2 ;;
+       *".3fs"*) SFFS=ext3 ;;
+       *".4fs"*) SFFS=ext4 ;;
+       *) echo "$L_SFFS_ERROR" #debug
+          echo -e "\\033[1;31m${L_SFFS_ERROR}\\033[0;39m" >/dev/console #31=red
+          ;;
+     esac
+     ;;
+ esac
+ if [ "$PFSCK" = "yes" ] ; then
+   echo "" > /dev/console
+   fsck_func "$ONE_LOOP" "$SFFS"
+ fi
+ #--
+ if [ "$SAVE_SZ_FN" ] ; then
+   #(2) resize extX filesystem - fill extX file. see above (1)
+   [ "$PFSCK" != "yes" ] && e2fsck -y "$ONE_LOOP" #debug
+   resize2fs -pf "$ONE_LOOP" #no size, will fill all of file.
+   echo -n "$(printf "${L_CONTINUING_LOADING}" "$PUPSAVEFILE")" > /dev/console
+   sync
+ fi
+ #--
  [ -d "$SAVE_LAYER" ] || mkdir $SAVE_LAYER
+ echo "mount -t $SFFS -o noatime $ONE_LOOP $SAVE_LAYER" #debug
  mount -t $SFFS -o noatime $ONE_LOOP $SAVE_LAYER
- [ $? -eq 0 ] || { PUPSAVE=""; losetup -d $ONE_LOOP; } 
+ if [ $? -ne 0 ] ; then
+   echo 'Warning: setting PUPSAVE=""' #debug
+   PUPSAVE=""
+   if [ "$ENCTYPE" = "luks" ] ; then
+     cryptsetup luksClose savefile
+     losetup -d $ONE_LOOP_PREV
+   else
+     losetup -d $ONE_LOOP
+   fi
+ fi
 }
+
 
 setup_save_file(){
  SAVE_REL_FN="$(echo "$PUPSAVE" | cut -f 3 -d ',')"
- echo -n "$(printf "${L_LOADING_PUPSAVE}" "$SAVE_REL_FN" "$SAVEPART")" > /dev/console
+ if [ -f "${SAVE_MP}${SAVE_REL_FN}" ];then #savefile
+  PUPSAVE_SIZE="$(format_bytes $(stat -c %s "${SAVE_MP}${SAVE_REL_FN}"))"
+  echo -n "$(printf "${L_LOADING_PUPSAVE_FILE}" "$SAVE_REL_FN" "$SAVEPART" "$PUPSAVE_SIZE")" > /dev/console
+ else
+  echo -n "$(printf "${L_LOADING_PUPSAVE}" "$SAVE_REL_FN" "$SAVEPART")" > /dev/console
+ fi
  rm -r -f "$SAVE_LAYER"
  SAVE_FN="${SAVE_MP}${SAVE_REL_FN}"
- if [ -f "$SAVE_FN" ];then #savefile
+ if [ -f "$SAVE_FN" ];then #savefile. ex: stretchsave.4fs
+  echo "--SAVEFILE-- $SAVE_FN" #debug
   load_ext_file
  elif [ -d "$SAVE_FN" ];then #savefolder
-  ln -s "$SAVE_FN" "$SAVE_LAYER"
+  echo "--SAVEFOLDER-- $SAVE_FN" #debug
+  ln -sv "$SAVE_FN" "$SAVE_LAYER"
  else
   PUPSAVE=""
  fi
-#[ "$PUPSAVE" ] && decrypt directory at SAVE_LAYER
+ #[ "$PUPSAVE" ] && decrypt directory at SAVE_LAYER
  if [ "$PUPSAVE" ];then
   SAVE_NAME="$(basename $SAVE_REL_FN)"
-  OLDDISTRO_VERSION="$(grep '^DISTRO_VERSION' $SAVE_LAYER/initrd/DISTRO_SPECS | cut -f 2 -d '=' | cut -f 2 -d "'" | cut -f 2 -d '"' | cut -f 1 -d ' ')"
-  if [ "$DISTRO_VERSION" != "$OLDDISTRO_VERSION" ]; then
-   echo "" >/dev/console
-   echo -en "\\033[1;36m" >/dev/console #36=aquablue
-   echo "$(printf "${L_UPGRADE_MSG_1}" "$OLDDISTRO_VERSION")" >/dev/console
-   echo "${L_UPGRADE_MSG_2}"  >/dev/console
-   echo -n "${L_UPGRADE_MSG_3}"  >/dev/console
-   echo -en "\\033[0;39m" >/dev/console
-   read noupgradesf
-   if [ "$noupgradesf" != "" ];then
-    echo -en "\\033[1;35m" >/dev/console #35=purple
-    echo "${L_UPGRADE_NO}" >/dev/console
+  #- fix for empty pupsaves (missing /initrd/DISTRO_SPECS)
+  if [ ! -f "$SAVE_LAYER/initrd/DISTRO_SPECS" ] ; then
+    touch /tmp/rc_update_force_pm5 # see /etc/rc.d/rc.update
+    PCLEAN=""
+  fi
+  #-
+  if [ "$PCLEAN" != "yes" -a -f "$SAVE_LAYER/initrd/DISTRO_SPECS" ];then
+   OLDDISTRO_VERSION="$(grep '^DISTRO_VERSION' $SAVE_LAYER/initrd/DISTRO_SPECS | cut -f 2 -d '=' | cut -f 2 -d "'" | cut -f 2 -d '"' | cut -f 1 -d ' ')"
+   if [ "$DISTRO_VERSION" != "$OLDDISTRO_VERSION" ]; then
+    echo "" >/dev/console
+    echo -en "\\033[1;36m" >/dev/console #36=aquablue
+    echo "$(printf "${L_UPGRADE_MSG_1}" "$OLDDISTRO_VERSION")" >/dev/console
+    echo "${L_UPGRADE_MSG_2}"  >/dev/console
+    echo -n "${L_UPGRADE_MSG_3}"  >/dev/console
     echo -en "\\033[0;39m" >/dev/console
-    PUPSAVE=""
-   else
-    #do upgrade processing
-    touch /tmp/version_update_flag
-    CURDIR="$(pwd)"
-    cd "$SAVE_LAYER"
-    #iterate over all files in save
-    for ONE_FILE in $(find . \( -type f -or -type l \) -print); do
-     ONE_BASE="${ONE_FILE##*/}" #basename
-     if [ "${ONE_BASE:0:4}" = ".wh." ]; then #remove most whiteout files
-      [ "${ONE_BASE:4:4}" = ".wh." ] && continue #internal aufs files
-      [ "${ONE_FILE%/*}" = "./root/.config/autostart" ] && continue #keep autostart changes
-      echo "Removing ${ONE_FILE}" 
-      rm -f "$ONE_FILE" #remove whiteout file
-     fi
-    done
-    cd "$CURDIR"
-    sync
+    read noupgradesf
+    if [ "$noupgradesf" != "" ];then
+     echo -e "\\033[1;35m${L_UPGRADE_NO}\\033[0;39m" >/dev/console #35=purple
+     PUPSAVE=""
+    else
+     PCLEAN="yes"
+    fi
    fi
+  fi
+  if [ "$PCLEAN" = "yes" ];then
+   #do upgrade processing
+   touch /tmp/version_update_flag
+   CURDIR="$(pwd)"
+   cd "$SAVE_LAYER"
+   #delete critical system files
+   #keep rc.local - user customisations and/or fixes.
+   echo "Removing $(ls ./lib/modules/$KERNELVER/modules.*)"
+   rm -f ./lib/modules/$KERNELVER/modules.*
+   RC_STUFF="$(ls ./etc/rc.d/rc.* | grep -v "/rc.local$" | tr '\n' ' ')"
+   echo "Removing $RC_STUFF"
+   rm -f $RC_STUFF
+   echo "Removing $(ls ./etc/rc.d/funct*)"
+   rm -f ./etc/rc.d/funct*
+   if [ "$(grep functions4puppy4 ./bin/mount)" != "" ]; then
+    rm -f ./bin/mount
+    rm -f ./bin/umount
+    rm -f ./usr/local/pup_event/frontend_*
+    rm -f ./usr/sbin/pmount
+    rm -f ./usr/sbin/pupscan
+   fi
+   #iterate over all files in save
+   for ONE_FILE in $(find . \( -type f -or -type l \) -print); do
+    ONE_BASE="${ONE_FILE##*/}" #basename
+    if [ "${ONE_BASE:0:4}" = ".wh." ]; then #remove most whiteout files
+     [ "${ONE_BASE:4:4}" = ".wh." ] && continue #internal aufs files
+     [ "${ONE_FILE%/*}" = "./root/.config/autostart" ] && continue #keep autostart changes
+     echo "Removing ${ONE_FILE}" 
+     rm -f "$ONE_FILE" #remove whiteout file
+    fi
+   done
+   cd "$CURDIR"
+   sync
   fi
   check_status 0
  else
   check_status 1
  fi
- [ "$PUPSAVE" ] || { PUPMODE=5; SAVE_MP=""; SAVE_LAYER=""; }
+ if [ ! "$PUPSAVE" ] ; then
+   echo "No pupsave. Setting PUPMODE 5" #debug
+   PUPMODE=5
+   SAVE_MP=""
+   SAVE_LAYER=""
+ fi
 }
 
 setup_save_part() {
  rm -r -f $SAVE_LAYER
- ln -s $SAVE_MP $SAVE_LAYER
- SAVE_FN="$SAVE_MP" #for after switch symbolic link
+ ln -sv ${SAVE_MP} $SAVE_LAYER
+ SAVE_FN="${SAVE_MP}" #for after switch symbolic link
  SAVE_NAME="$SAVEPART"
 }
 
-copy_folders() {
+copy_folders() { #SAVE_LAYER=/pup_ro1
+ echo -e "\n-------------------- copy_folders" #debug
+ echo "SAVE_MP=$SAVE_MP"
  DESTDIR="/mnt/tmpfs/pup_ro1"
  [ -d "$DESTDIR" ] || mkdir -p $DESTDIR
+ rm -r -f "$SAVE_LAYER"
+ SAVE_FN="$DESTDIR"
  ln -s $DESTDIR $SAVE_LAYER
- BKFOLDERS="$(ls -1 -r $SAVE_MP | grep '^20[0-9][0-9]')"
- BKLASTFOLDER="$(echo "$BKFOLDERS" | head -n 1)"
+ #BKFOLDERS now set in check for pupmode=77
+ BKLASTFOLDER="$(echo "${BKFOLDERS}" | head -n 1)"
  #a boot option allows ignore last n sessions, also need to create a badlist...
  if [ "$PIGNORELAST" ];then
-  BKBADLIST="$(echo "$BKFOLDERS" | head -n ${PIGNORELAST})"
-  if [ -f $SAVE_MP/$BKLASTFOLDER/.badfolders ];then
-   cp $SAVE_MP/$BKLASTFOLDER/.badfolders $DESTDIR/
+  BKBADLIST="$(echo "${BKFOLDERS}" | head -n ${PIGNORELAST})"
+  if [ -f ${SAVE_MP}/${BKLASTFOLDER}/.badfolders ];then
+   cp ${SAVE_MP}/${BKLASTFOLDER}/.badfolders ${DESTDIR}/
    if [ $? -ne 0 ];then
     #fallback, in case last folder badly corrupted...
-    BKPREVFOLDER="$(echo "$BKFOLDERS" | head -n 2 | tail -n 1)"
-    [ -f $SAVE_MP/$BKPREVFOLDER/.badfolders ] && cp $SAVE_MP/$BKPREVFOLDER/.badfolders $DESTDIR/
+    BKPREVFOLDER="$(echo "${BKFOLDERS}" | head -n 2 | tail -n 1)"
+    [ -f ${SAVE_MP}/${BKPREVFOLDER}/.badfolders ] && cp ${SAVE_MP}/${BKPREVFOLDER}/.badfolders ${DESTDIR}/
    fi
   fi
-  echo "$BKBADLIST" >> $DESTDIR/.badfolders
+  echo "$BKBADLIST" >> ${DESTDIR}/.badfolders
   #note, rc.shutdown and savesession-dvd 'touch' this file so it will get saved.
   sync
  else
-  [ -f $SAVE_MP/$BKLASTFOLDER/.badfolders ] && cp $SAVE_MP/$BKLASTFOLDER/.badfolders $DESTDIR/
+  [ -f ${SAVE_MP}/${BKLASTFOLDER}/.badfolders ] && cp ${SAVE_MP}/${BKLASTFOLDER}/.badfolders ${DESTDIR}/
  fi
- [ -f $DESTDIR/.badfolders ] && BKBADLIST="$(cat $DESTDIR/.badfolders | tr "\n" " ")"
- BKFOLDERS="$(echo -n "$BKFOLDERS" | tr "\n" " ")"
- for ONEFOLDER in $BKFOLDERS;do
-  if [ ! "$(echo -n "$BKBADLIST" | grep "$ONEFOLDER")" = "" ];then
-   echo "$(printf "${L_FOLDER_MARKED_BAD}" "$ONEFOLDER")" >/dev/console
+ [ -f ${DESTDIR}/.badfolders ] && BKBADLIST="$(cat ${DESTDIR}/.badfolders | tr "\n" " ")"
+ echo "BKBADLIST=${BKBADLIST}" #debug
+ BKFOLDERS="$(echo -n "${BKFOLDERS}" | tr "\n" " ")"
+ for ONEFOLDER in ${BKFOLDERS}
+ do
+  if [ "$(echo -n "$BKBADLIST" | grep "${ONEFOLDER}")" != "" -o -L "${SAVE_MP}/${ONEFOLDER}" ];then
+   echo "$(printf "${L_FOLDER_MARKED_BAD}" "${ONEFOLDER}")" >/dev/console
    continue #ignore bad folder.
   fi
-  echo -n "$(printf "${L_LOADING_FROM_CD}" "$ONEFOLDER")" >/dev/console
+  echo "$ONEFOLDER" #debug
+  echo -n "$(printf "${L_LOADING_FROM_CD}" "${ONEFOLDER}")" >/dev/console
   #need to be careful not to overfill the ramdisk...
   FREERAMDISK=$(df 2>/dev/null | grep /mnt/tmpfs | head -n 1 | tr -s " " | cut -f 4 -d " ")
   SIZEFOLDER=$(du -k -s ${SAVE_MP}/${ONEFOLDER} | cut -f 1)
+  SIZEARCHIVE=0
   if [ -d ${SAVE_MP}/${ONEFOLDER}/archive ];then
    SIZEARCHIVE=$(du -k -s ${SAVE_MP}/${ONEFOLDER}/archive | cut -f 1)
-  else
-   SIZEARCHIVE=0
   fi
   SIZESOURCE=$(expr $SIZEFOLDER - $SIZEARCHIVE)
   if [ $FREERAMDISK -gt $SIZESOURCE ];then
    #well, -u will only copy if files newer, so less stuff may get copied than calc'd above.
    #need to copy everything except archive folder...
-   [ -d $SAVE_MP/$ONEFOLDER/bin ] && cp -a -u $SAVE_MP/$ONEFOLDER/bin $DESTDIR/   > /dev/null 2>&1
-   [ -d $SAVE_MP/$ONEFOLDER/sbin ] && cp -a -u $SAVE_MP/$ONEFOLDER/sbin $DESTDIR/   > /dev/null 2>&1
-   [ -d $SAVE_MP/$ONEFOLDER/etc ] && cp -a -u $SAVE_MP/$ONEFOLDER/etc $DESTDIR/   > /dev/null 2>&1
-   [ -d $SAVE_MP/$ONEFOLDER/lib ] && cp -a -u $SAVE_MP/$ONEFOLDER/lib $DESTDIR/   > /dev/null 2>&1
-   [ -d $SAVE_MP/$ONEFOLDER/opt ] && cp -a -u $SAVE_MP/$ONEFOLDER/opt $DESTDIR/   > /dev/null 2>&1
-   if [ -d $SAVE_MP/$ONEFOLDER/root/.var_saved ];then #100820 see /etc/rc.d/functions4puppy
-    mkdir -p $DESTDIR/var
-    cp -a -u $SAVE_MP/$ONEFOLDER/root/.var_saved/* $DESTDIR/var/ > /dev/null 2>&1
+   [ -d ${SAVE_MP}/${ONEFOLDER}/bin ] && cp -a -u ${SAVE_MP}/${ONEFOLDER}/bin ${DESTDIR}/
+   [ -d ${SAVE_MP}/${ONEFOLDER}/sbin ] && cp -a -u ${SAVE_MP}/${ONEFOLDER}/sbin ${DESTDIR}/
+   [ -d ${SAVE_MP}/${ONEFOLDER}/etc ] && cp -a -u ${SAVE_MP}/${ONEFOLDER}/etc ${DESTDIR}/
+   [ -d ${SAVE_MP}/${ONEFOLDER}/lib ] && cp -a -u ${SAVE_MP}/${ONEFOLDER}/lib ${DESTDIR}/
+   [ -d ${SAVE_MP}/${ONEFOLDER}/opt ] && cp -a -u ${SAVE_MP}/${ONEFOLDER}/opt ${DESTDIR}/
+   if [ -d ${SAVE_MP}/${ONEFOLDER}/root/.var_saved ];then #100820 see /etc/rc.d/functions4puppy
+    mkdir -p ${DESTDIR}/var
+    cp -a -u ${SAVE_MP}/${ONEFOLDER}/root/.var_saved/* ${DESTDIR}/var/
    fi
-   [ -d $SAVE_MP/$ONEFOLDER/root ] && cp -a -u $SAVE_MP/$ONEFOLDER/root $DESTDIR/   > /dev/null 2>&1
-   [ -d $SAVE_MP/$ONEFOLDER/root/.var_saved ] && rm -rf $DESTDIR/root/.var_saved > /dev/null 2>&1 #100820
-   [ -d $SAVE_MP/$ONEFOLDER/usr ] && cp -a -u $SAVE_MP/$ONEFOLDER/usr $DESTDIR/   > /dev/null 2>&1
-   cp -a -u $SAVE_MP/$ONEFOLDER/*.sfs $DESTDIR/   > /dev/null 2>&1 #v3.97
+   [ -d ${SAVE_MP}/${ONEFOLDER}/root ] && cp -a -u ${SAVE_MP}/${ONEFOLDER}/root ${DESTDIR}/
+   [ -d ${SAVE_MP}/${ONEFOLDER}/root/.var_saved ] && rm -rf ${DESTDIR}/root/.var_saved
+   [ -d ${SAVE_MP}/${ONEFOLDER}/usr ] && cp -a -u ${SAVE_MP}/${ONEFOLDER}/usr ${DESTDIR}/
+   [ -f ${DESTDIR}/root/.XLOADED ] && rm -fv ${DESTDIR}/root/.XLOADED #toxic
+   cp -a -u ${SAVE_MP}/${ONEFOLDER}/*.sfs ${DESTDIR}/ 2>/dev/null
    #delete deleted files (.wh.filename)... 110212 screen out .wh..wh..opq
-   WHITEOUTS="$(find $DESTDIR -xdev -type f -name .wh.* | grep -v '__dir_opaque' | grep -v '.wh..wh.')" #110212
-   echo "$WHITEOUTS" |
-   while read DELWHITE;do
-    DELFILE="$(echo -n "$DELWHITE" | sed -e 's/\\.wh\\.//g')"
+   WHITEOUTS="$(find ${DESTDIR} -xdev -type f -name .wh.* | grep -v '__dir_opaque' | grep -v '.wh..wh.')" #110212
+   echo "$WHITEOUTS" | while read DELWHITE ; do
+    DELFILE="$(echo -n "$DELWHITE" | sed -e 's/\.wh\.//g')"
     if [ -e "$DELFILE" ];then
+     [ "$PDEBUG" ] && echo "Deleting $DELFILE" #debug
      rm -rf "$DELFILE"
      rm -rf "$DELWHITE"
     fi
    done
    check_status 0 #display 'done' for each folder loaded.
   else
-   printf "${L_RAM_DISK_FULL}\n" "$ONEFOLDER"
+   printf "${L_RAM_DISK_FULL}\n" "${ONEFOLDER}"
    check_status 1
    break
   fi
  done
  sync
+ echo -e "--------------------\n" # debug
 }
 
-prepend_dir() {
- rm -r -f ${SAVE_LAYER}/tmp #in case last boot was pupmode=12
+prepend_dir() { #SAVE_LAYER=/pup_ro1
+ rm -rf ${SAVE_LAYER}/tmp #in case last boot was pupmode=12
  #adjust stack
- mount -o remount,add:1:${SAVE_LAYER}=ro+wh /pup_new
+ echo "mount -o remount,add:1:${SAVE_LAYER}=ro+wh /pup_new" #debug
+ mount -o remount,add:1:${SAVE_LAYER}=ro+wh /pup_new #ro+wh = Readonly branch and it has/might have whiteouts on it
  if [ $? -eq 0 ];then
-  KEEPMOUNTED="${KEEPMOUNTED}${SAVEPART} "
+  [ $PUPMODE -ne 77 ] && KEEPMOUNTED="${KEEPMOUNTED}${SAVEPART} "
   [ "$SAVE_NAME" ] && NEWUNIONRECORD="$SAVE_NAME $NEWUNIONRECORD"
  else
   printf "${L_ADDING_SAVE_LAYER_FAILED}\n" "$SAVE_LAYER"
  fi
 }
 
-replace_dir() {
+replace_dir() { #SAVE_LAYER=/pup_rw
  #setup empty /tmp on tmpfs for in stack
- rm -r -f ${SAVE_LAYER}/tmp
- mkdir -p /mnt/tmpfs/tmp
- ln -s /pup_new/initrd/mnt/tmpfs/tmp ${SAVE_LAYER}/tmp
+ rm -rf ${SAVE_LAYER}/tmp
  #adjust stack
+ echo "mount -o remount,prepend:${SAVE_LAYER}=rw,mod:/mnt/tmpfs/pup_rw=ro,del:/mnt/tmpfs/pup_rw /pup_new" #debug
  mount -o remount,prepend:${SAVE_LAYER}=rw,mod:/mnt/tmpfs/pup_rw=ro,del:/mnt/tmpfs/pup_rw /pup_new
  if [ $? -eq 0 ];then
-  rm -r -f /mnt/tmpfs/pup_rw
+  rm -rf /mnt/tmpfs/pup_rw
   KEEPMOUNTED="${KEEPMOUNTED}${SAVEPART} "
   [ "$SAVE_NAME" ] && NEWUNIONRECORD="$SAVE_NAME $NEWUNIONRECORD"
  else
@@ -602,25 +763,53 @@ find_save_file() {
 # "$1" - mount point - ex:  /mnt/pdrv
 # "$2" - partition name - ex: sdb2
 # "$3" - file system type - ex: ext4
- if [ "$ONE_FS_IS_LINUX" = "yes" ];then
-  SAVE_FILES="$(ls -d ${1}${PSUBDIR}/${DISTRO_FILE_PREFIX}save* 2>/dev/null)"
+ if [ "$SAVE_BP_DIR" ];then
+  SAVE_DIR="$SAVE_BP_DIR"
  else
-  SAVE_FILES="$(ls -d ${1}${PSUBDIR}/${DISTRO_FILE_PREFIX}save*.?fs 2>/dev/null)"
+  SAVE_DIR="${PSUBDIR}/"
  fi
+ SAVE_FILES="$(ls -d ${1}${SAVE_DIR}${DISTRO_FILE_PREFIX}save* 2>/dev/null)"
  for ONE_SAVE in $SAVE_FILES;do
   #validate savefiles here
-  [ -d "$ONE_SAVE" -o -s "$ONE_SAVE" ] && PUPSAVES="${PUPSAVES}${2},${3},${PSUBDIR}/$(basename $ONE_SAVE) "
+  IS_OK=""
+  case $ONE_SAVE in
+   *.2fs|*.3fs|*.4fs)
+    [ -s "$ONE_SAVE" ] && IS_OK="yes"
+   ;;
+   *.BKP-*) #written by /usr/sbin/pupsave-backup
+    case $ONE_SAVE in
+     *.2fs*|*.3fs*|*.4fs*) IS_OK="$PSAVEBKP" ;;
+     *) [ "$ONE_FS_IS_LINUX" = "yes" ] && IS_OK="$PSAVEBKP" ;;
+    esac
+   ;;
+   *)
+    [ "$ONE_FS_IS_LINUX" = "yes" ] && [ -d "$ONE_SAVE" ] && IS_OK="yes"
+   ;;
+  esac
+  [ "$IS_OK" = "yes" ] && PUP_SAVES="${PUP_SAVES}${2},${3},${SAVE_DIR}$(basename $ONE_SAVE)
+"
  done
+ PUP_SAVES="$(echo "$PUP_SAVES")" #remove trailing newline char
+ echo "MENU_MAX_PUPSAVES=${MENU_MAX_PUPSAVES}" #debug
+ if [ "$MENU_MAX_PUPSAVES" ] ; then
+   PUP_SAVES="$(echo "$PUP_SAVES" | head -n $MENU_MAX_PUPSAVES)"
+ fi
 }
 
 search_func() {
  [ "$PDEBUG" -a "$LOOK_SAVE" ] && echo "3: filename=${PSUBDIR}/${DISTRO_FILE_PREFIX}save"
  [ "$PDEBUG" -a "$LOOK_PUP" ] && echo "3: PSUBDIR=$PSUBDIR P_BP_FN=$P_BP_FN P_DEF_FN=$P_DEF_FN"
+ echo "HAVE_PARTS='${HAVE_PARTS}'" #debug
  if [ "${1}" ];then
-  TRY_PARTS="$(echo "$HAVE_PARTS" | grep -E "${1}")"
+  echo "param='${1}'" #debug
+  TRY_PARTS_FIRST="$(echo "$HAVE_PARTS" | grep -E "${1}")"
+  TRY_PARTS_LAST="$(echo "$HAVE_PARTS" | grep -Ev "${1}")"
+  TRY_PARTS="$TRY_PARTS_FIRST
+$TRY_PARTS_LAST"
  else
   TRY_PARTS="$HAVE_PARTS"
  fi
+ echo "TRY_PARTS='${TRY_PARTS}'" #debug
  [ "$TRY_PARTS" ] || return
  for ONETRY in $TRY_PARTS;do
   ONE_PART="$(echo -n "$ONETRY" | cut -f 1 -d '|')"
@@ -630,7 +819,7 @@ search_func() {
    if [ "$LOOK_SAVE" -a "$SAVEPART" = "" ];then
     set_fs_linux "$ONE_FS"
     find_save_file "$ONE_MP" "$ONE_PART" "$ONE_FS"
-    if [ "$PUPSAVES" ];then
+    if [ "$PUP_SAVES" ];then
      SAVEPART="$ONE_PART"
      [ "$PDEBUG" ] && echo "5: ONE_PART=$ONE_PART filename=${PSUBDIR}/${DISTRO_FILE_PREFIX}save"
     fi
@@ -651,9 +840,11 @@ search_func() {
 }
 
 get_part_info() {
+ probedisk > /tmp/ALLDRVS
  ls -1 /sys/block | grep -E '^scd|^sd|^mmc|^sr' > /tmp/ALLDRVS0
  PCPARTSALL="$(/sbin/probepart_init -k)"
  HAVE_PARTS="$(echo "$PCPARTSALL" | grep '^/dev/' | cut -f 1-2 -d '|'  | grep -E 'f2fs|udf|iso9660|ext2|ext3|ext4|reiserfs|msdos|vfat|minix|ntfs' | sed -e 's%/dev/%%')"
+ [ "$PDEBUG" ] && echo "$HAVE_PARTS" > /tmp/HAVE_PARTS
 }
 
 wait_for_usb() {
@@ -681,14 +872,24 @@ fatal_error() {
  check_status -critical 1 "$1"
 }
 
+#=============================================================
+#                           MAIN
+#=============================================================
+
 clear #clear the screen.
+
+echo -en "\\033[0;34m***\\033[0;37m ${DISTRO_NAME} ${DISTRO_VERSION}"
+echo -en "\\033[0;34m -\\033[0;37m Linux ${KERNELVER} "
+echo -en "\\033[0;31m[\\033[0;37m`uname -m`\\033[0;31m]"
+echo -e "\\033[0;34m ***\\033[0;39m"
+
 [ ! "$LOGLEVEL" ] && exec 1>/tmp/bootinit.log 2>&1 #remove o/p from console. v2.22 loglevel added.
 
-[ $plang ] && PLANG=$plang #boot parameter
-[ "`echo -n "$PLANG" | grep '_'`" = "" ] && PLANG="" #PLANG must be complete, ex: de_DE.UTF-8.
-[ ! "$PLANG" ] && [ -s /PUPPYLANG ] && PLANG=`cat /PUPPYLANG` #so Woof can specify a default lang.
+[ ! -f /bin/resize2fs ] && touch /tmp/no_resize2fs
 
-[ $pkeys ] && PKEYS=$pkeys #boot parameter, keyboard layout w476
+# sets PLANG, PKEYS, VFAT_OUT_PARAM, FONTMAP, KMAP, CODEPAGE
+[ -f /sbin/set_plang ] && . /sbin/set_plang
+
 #pmedia= usbflash|usbhd|usbcd|ataflash|atahd|atacd|atazip|scsihd|scsicd|cd
 [ $pmedia ] && PMEDIA=$pmedia #boot parameter, broad category of boot media. ex: cd.
 [ $psubdir ] && PSUBDIR=$psubdir #boot parameter, directory for puppy files. ex: puppy220
@@ -706,13 +907,16 @@ clear #clear the screen.
 [ $ydrv ] && YDRV=$ydrv
 #<partition>:<filename>, for savefile/savefolder. <partition> can be a name or Label or UUID
 [ $psave ] && PSAVE=$psave #ex: sdb4:/puppy/tahr/tahrsave or smark or 49baa82d-8c69:tahrsave
-
 #list of kernel modules to load, ex: pimod=hid-logitech-dj.ko,kernel/drivers/hid/hid-multitouch.ko 
 [ $pimod ] && PIMOD=$pimod
+#specify partition for Underdog Linux (refer also underdog.lnx).
+[ $underdog ] && UNDERDOG=$underdog
+#[ $pdebug ] && PDEBUG=$pdebug
+PDEBUG=1
+TOTAL_SIZEK_SFS_RAM=0
 
-[ $underdog ] && UNDERDOG=$underdog #120130 specify partition for Underdog Linux (refer also underdog.lnx).
-
-[ $pdebug ] && PDEBUG=$pdebug
+# show menu with pupsaves
+[ $psavemenu ] && PSAVEMENU=$psavemenu
 
 RDSH=""
 if [ "$pfix" ];then
@@ -723,94 +927,30 @@ if [ "$pfix" ];then
    rdsh)    RDSH="yes";;          #exit to shell in initial ramdisk.
    nox)     PNOX="yes";;          #do not start X.
    clean)   PCLEAN="yes";;        #force version upgrade and cleanup.
-   purge)   PPURGE="yes";;        #radical cleanup for broken system.
    trim)    PTRIM="yes";;         #add "discard" to mount options if SSD
    copy)    PCOPY="yes";;         #copy .sfs files into ram.
    nocopy)  PNOCOPY="yes";;        #do not copy .sfs files into ram (default is copy if enough ram).
    fsck)    PFSCK="yes";;         #do a fsck of ${DISTRO_FILE_PREFIX}save file.
    fsckp)   PFSCKP="yes";;        #do fsck before first mount of ext partitions
    [0-9]*)  PIGNORELAST=$ONEFIX;; #blacklist last $ONEFIX folders (multisession).
+   psavebkp)PSAVEBKP='yes';;      #don't ignore pupsaves created by Pupsave Backup
+   luks)    COPY_CRYPTSETUP=yes;; #make sure cryptsetup is not missing after switching root
    *)       echo "pfix=$ONEFIX is not a known boot parameter";;
   esac
  done
 fi
 
-[ -f /BOOT_SPECS ] && . /BOOT_SPECS
+[ "$PRAMONLY" != "yes" ] && [ -f /BOOT_SPECS ] && . /BOOT_SPECS
 
-[ "$TZ" ] || TZ='XXX-20'
-export TZ
+if [ "$PSAVEMENU" ] ; then
+ #MENU_MAX_PUPSAVES=number
+ MENU_MAX_PUPSAVES=$(echo "$PSAVEMENU" | grep -o '[0-9]' | tr '\n' ' ' | sed 's| ||g')
+fi
+
+[ "$TZ" ] && export TZ
 hwclock -l -s
 
 [ "$PDEBUG" ] && echo "0: PMEDIA=$PMEDIA PDRV=$PDRV PSUBDIR=$PSUBDIR pfix=$pfix"
-
-#120216 /PUPPYKEYMAP inserted in initrd by quicksetup (in future, by Woof too)...
-FONTMAP=""
-[ ! "$PKEYS" ] && [ -s /PUPPYKEYMAP ] && PKEYS="`cat /PUPPYKEYMAP`" #allow kernel boot param to override.
-if [ "$PLANG" ];then
- if [ ! "$PKEYS" ];then
-  #try to set PKEYS to match the language. first 2 letters of PLANG...
-  PKEYS=${PLANG:0:2} #rough as guts, assign first 2 chars of PLANG to PKEYS.
-  case $PLANG in
-   en*) PKEYS=us ;;
-  esac
- fi
- #120216 L18L suggests load these, instead of what is below...
- case $PLANG in
-  en*) echo ;;
-  ar*|iw*) #L18L no Greek
-   setfont /lib/consolefonts/LatArCyrHeb-16.psfu.gz -C /dev/tty1
-   FONTMAP='LatArCyrHeb-16.psfu'
-  ;;
-  ru*) #vkvkvk for ru
-   zcat /lib/consolefonts/ter-u16n.psf.gz | loadfont
-   FONTMAP='ter-u16n.psf'
-  ;;
-  *) #L18L All European languages; new default ?!
-   zcat /lib/consolefonts/LatGrkCyr-8x16.psfu.gz | loadfont
-   FONTMAP='LatGrkCyr-8x16.psfu'
-  ;;
- esac
- if [ -f /locale/${PLANG%.*}/init.mo ];then
-   . /locale/${PLANG%.*}/init.mo
- elif [ -f /locale/${PLANG%_*}/init.mo ];then
-   . /locale/${PLANG%_*}/init.mo
- fi
-fi
-
-#091122 load keyboard layout if PKEYS boot param...
-STATUS=0
-VFAT_OUT_PARAM='shortname=mixed,quiet,utf8'
-CODEPAGE=""
-KMAP=""
-if [ "$PKEYS" ];then
- if [ ! -f /lib/keymaps/${PKEYS}.gz ];then
-  PKEYS="`ls -1 /lib/keymaps/${PKEYS}*.gz | head -n 1 | rev | cut -f 1 -d '/' | cut -f 2 -d '.' | rev`"
- fi
- if [ -f /lib/keymaps/${PKEYS}.gz ];then
-  echo "$(printf "${L_LOADING_KEYBOARD_LAYOUT}" "$PKEYS")" >/dev/console
-  KMAP="$PKEYS"
-  zcat /lib/keymaps/${PKEYS}.gz | loadkmap ; STATUS=$(($STATUS + $?))
-  case $PKEYS in #note, same code in /etc/rc.d/rc.country, /usr/sbin/input-wizard and init.
-   de*|be*|br*|dk*|es*|fi*|fr*|it*|no*|se*|pt*)
-    [ ! "$PLANG" ] && FONTMAP="lat1-12.psfu" #120216
-    CODEPAGE="850"
-    VFAT_OUT_PARAM="$OUT_PARAM"',codepage=850'
-   ;;
-   cz*|hu*|pl*|ro*|sk*|croat*|slovene*)
-    [ ! "$PLANG" ] && FONTMAP="lat2-12.psfu" #120216
-    CODEPAGE="852"
-    VFAT_OUT_PARAM="$OUT_PARAM"',codepage=852,iocharset=iso8859-2'
-   ;;
-  esac
-  if [ ! "$PLANG" ];then #120216 old behaviour.
-   if [ "$FONTMAP" ];then #100520 fix syntax error...
-    zcat /lib/consolefonts/${FONTMAP}.gz | loadfont
-    STATUS=$(($STATUS + $?))
-   fi
-  fi
-  check_status $STATUS
- fi
-fi
 
 #100915 technosaurus recommendation (see above)...
 [ "$PDRV" ] && { decode_spec "$PDRV"; P_BP_ID="$ONE_BP_ID"; P_BP_FN="$ONE_BP_FN"; PDRV=""; }
@@ -819,6 +959,8 @@ fi
 [ "$ADRV" ] && { decode_spec "$ADRV"; A_BP_ID="$ONE_BP_ID"; A_BP_FN="$ONE_BP_FN"; ADRV=""; }
 [ "$YDRV" ] && { decode_spec "$YDRV"; Y_BP_ID="$ONE_BP_ID"; Y_BP_FN="$ONE_BP_FN"; YDRV=""; }
 [ "$PSAVE" ] && { decode_spec "$PSAVE"; SAVE_BP_ID="$ONE_BP_ID"; SAVE_BP_FN="$ONE_BP_FN"; }
+SAVE_BP_DIR=""
+[ "$SAVE_BP_FN" ] && [ "${SAVE_BP_FN:$((${#SAVE_BP_FN} - 1))}" = "/" ] && SAVE_BP_DIR="$SAVE_BP_FN" #last char
 
 #first look inside initrd...
 #unset x_DEF_FN so that find_onepupdrv() won't look for it
@@ -828,11 +970,16 @@ fi
 [ -f /${A_DEF_FN} ] && { ADRV="rootfs,rootfs,/$A_DEF_FN"; A_DEF_FN=""; }
 [ -f /${Y_DEF_FN} ] && { YDRV="rootfs,rootfs,/$Y_DEF_FN"; Y_DEF_FN=""; }
 
+#-----------------------------
+# see if actually a non-huge kernel is being used..
+not_a_huge_kernel_stuff && check_status 0
+#-----------------------------
+
 get_part_info
 grep -v '^sr' /tmp/ALLDRVS0 > /tmp/ATADRIVES0
 ATAOPTICALDRIVES="$(grep '^sr' /tmp/ALLDRVS0 | tr '\n' ' ')"
 
-PUPSAVES=""
+PUP_SAVES=""
 KEEPMOUNTED=""
 FSCKDPARTS=""
 BLKIDOUT=""
@@ -864,8 +1011,13 @@ if [ "$LOOK_PUP" -o "$LOOK_SAVE" ];then #something to search for
  [ "${PMEDIA:0:3}" != "usb" ] && search_func
  if [ "$P_PART" = "" ];then
   wait_for_usb
-  USBDRVS="$(find /sys/block -maxdepth 1 -name 'sd*' -o -name 'sr*' | xargs -n 1 readlink 2>/dev/null | grep '/usb[0-9]' | rev | cut -f 1 -d '/' | rev | tr '\n' ' ')"
-  [ "$USBDRVS" ] && search_func "$(echo -n $USBDRVS | tr ' ' '|')"
+  USBDRVS="$(find /sys/block -maxdepth 1 -name 'sd*' -o -name 'sr*' | xargs -n 1 readlink 2>/dev/null | grep '/usb[0-9]' | rev | cut -f 1 -d '/' | rev | tr '\n' '|')"
+  [ "$PDEBUG" ] && echo "2: USBDRVS=$USBDRVS -> ${USBDRVS%|}"
+  if [ "$USBDRVS" ] ; then
+    search_func "${USBDRVS%|}"
+  else
+    search_func
+  fi
  fi
 fi
 [ "$P_BP_ID" ] && { log_part_id "$P_BP_ID"; ONE_PART="$P_BP_ID"; }
@@ -889,14 +1041,6 @@ if [ "$P_PART" ];then
   [ "$PSAVEMARK" ] && SAVEPART="${BOOTDRV}${PSAVEMARK}" #note, PSAVEMARK could also be a kernel boot param. ex: sda2
   [ "$SAVEPART" ] || SAVEPART="$P_PART"
  fi
-fi
-#ensure SAVEPART will be mounted on /mnt/dev_save
-#if SAVEPART is the same as P_PART
-SAVE_MP="/mnt/dev_save"
-if [ "$SAVEPART" -a "$SAVEPART" = "$P_PART" ];then
- #this mount move needs to be done before loading any sfs's
- [ -d "$SAVE_MP" ] || mkdir -p $SAVE_MP
- [ "$P_MP" ] && { mount -o move $P_MP $SAVE_MP; P_MP="$SAVE_MP"; } 
 fi
 
 #have pup...sfs, now try to load it
@@ -972,24 +1116,29 @@ fi
 
 #support initmodules.txt
 if [ "$PIMOD" = "" ]; then
-  [ -s "${SAVE_MP}${PSUBDIR}/initmodules.txt" ] && PIMOD="$(cat ${SAVE_MP}${PSUBDIR}/initmodules.txt)"
+  PIMOD_DIR=""
+  case $SAVE_BP_FN in
+    */*) PIMOD_DIR="${SAVE_BP_FN%/*}" ;;
+    *) PIMOD_DIR="${PSUBDIR}" ;;
+  esac
+  PIMOD_FN="${SAVE_MP}${PIMOD_DIR}/${DISTRO_FILE_PREFIX}initmodules.txt"
+  if [ -s "$PIMOD_FN" ]; then
+   PIMOD="$(cat "$PIMOD_FN")"
+   echo "Using $PIMOD_FN"
+  fi
 fi
 #insmod modules needed by keyboard
-if [ "$PIMOD" != "" ];then
- [ -d /lib/modules ] && mv -f /lib/modules /lib/modules.bak
- ln -s /pup_new/lib/modules /lib/modules
- [ -d /lib/firmware ] && mv -f /lib/firmware /lib/firmware.bak
- ln -s /pup_new/lib/firmware /lib/firmware
- MODSPATH="/lib/modules/$KERNELVER"
+if [ "$PIMOD" != "" ]; then
+ MODSPATH="/pup_new/lib/modules/$KERNELVER"
  for ONEMOD in `echo -n "$PIMOD" | tr ',' ' '`;do
   CURMOD=""
   if [ -f "${MODSPATH}/${ONEMOD}" ];then
    CURMOD="$ONEMOD"
   else
-   CURMOD="`grep -m1 $ONEMOD $MODSPATH/modules.order`"
+   CURMOD="`grep -m1 $ONEMOD /pup_new/etc/modules/modules.order-${KERNELVER}`"
    if [ "$CURMOD" = "" ];then
     MODPATN="`echo -n "$ONEMOD" | tr '_' '-'`"
-    CURMOD="`grep -m1 "$MODPATN" $MODSPATH/modules.order`"
+    CURMOD="`grep -m1 "$MODPATN" /pup_new/etc/modules/modules.order-${KERNELVER}`"
    fi
    [ -f "${MODSPATH}/${CURMOD}" ] || CURMOD=""
   fi
@@ -999,35 +1148,44 @@ if [ "$PIMOD" != "" ];then
    check_status $?
   fi
  done
- rm -f /lib/modules
- [ -d /lib/modules.bak ] && mv /lib/modules.bak /lib/modules
- rm -f /lib/firmware
- [ -d /lib/firmware.bak ] && mv /lib/firmware.bak /lib/firmware
 fi
 
 #find PUPSAVE, sortout pupmode
 PUPMODE=5
+
+#debug
+echo --------------------
+echo "SAVE_MP=${SAVE_MP}"
+echo "PRAMONLY=${PRAMONLY}"
+echo "BOOTDRV=${BOOTDRV}"
+mount
+echo --------------------
+
 PUPSAVE=""
-if [ "$SAVE_MP" -a "$PRAMONLY" != "yes" ];then #have mounted save? partition
+if [ "${SAVE_MP}" != "" -a "$PRAMONLY" != "yes" ];then #have mounted save? partition
  #check if save partition is linux
  set_fs_linux "$SAVE_FS"
  #check for cd multisession
- if [ "$(ls -l /dev/$BOOTDRV | cut -f4 -d' ')" = "cdrom" ];then #booting on optical, is it multisession?...
-  FND_MULTIFOLDER="$(find $SAVE_MP -maxdepth 1 -xdev -type d -name 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9] | grep -v ' ' | sed -e 's%^/mnt/pdrv%%' | head -n 1)"
-  if [ "$FND_MULTIFOLDER" ];then #multisession cd/dvd
-   PUPMODE=77
-   PUPSAVE="${SAVEPART},${SAVE_FS},${FND_MULTIFOLDER}"
+ if [ "$SAVE_FS" = "iso9660" ];then #booting on optical, is it multisession?...
+  BKFOLDERS="$(find $SAVE_MP -maxdepth 1 -xdev -type d -name '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' | sed -e s%^${SAVE_MP}/%% | sort -r)"
+  if [ "$BKFOLDERS" ];then #multisession cd/dvd
+   FND_MULTIFOLDER="/$(echo "$BKFOLDERS" | head -n 1)"
+   if [ "$FND_MULTIFOLDER" ];then #multisession cd/dvd
+    PUPMODE=77
+    PUPSAVE="${SAVEPART},${SAVE_FS},${FND_MULTIFOLDER}"
+   fi
   fi
  fi
+ echo "FND_MULTIFOLDER=${FND_MULTIFOLDER}" #debug
  #check for save to partition 
- if [ "$ONE_FS_IS_LINUX" = "yes" -a "$PSUBDIR" = "" -a -f "$SAVE_MP/etc/rc.d/PUPSTATE" ];then
+ if [ "$ONE_FS_IS_LINUX" = "yes" -a "$PSUBDIR" = "" -a -f "${SAVE_MP}/etc/rc.d/PUPSTATE" ];then
   PUPMODE=6
   PUPSAVE="${SAVEPART},${SAVE_FS},/"
  fi
  #not sorted yet, may be pupmode=12
  if [ $PUPMODE -eq 5 ];then
   #check boot spec
-  if [ "$SAVE_BP_FN" ];then
+  if [ "$SAVE_BP_FN" -a "$SAVE_BP_DIR" = "" ];then
    if [ -d "${SAVE_MP}${SAVE_BP_FN}" ];then
     [ "$ONE_FS_IS_LINUX" = "yes" ] && PUPSAVE="$SAVEPART,$SAVE_FS,$SAVE_BP_FN"
    else
@@ -1036,20 +1194,23 @@ if [ "$SAVE_MP" -a "$PRAMONLY" != "yes" ];then #have mounted save? partition
    [ "$PUPSAVE" ] || echo "$SAVEPART, $SAVE_BP_FN file not found."
   else
    #have to find savefile/savefolder
-   [ "$PUPSAVES" ] || find_save_file "$SAVE_MP" "$SAVEPART" "$SAVE_FS"
-   if [ "$PUPSAVES" ];then
-    NUMPUPSAVES=0
-    for ONE_SAVE in $PUPSAVES;do
-     NUMPUPSAVES=$(expr $NUMPUPSAVES + 1)
+   [ "$PUP_SAVES" ] || find_save_file "${SAVE_MP}" "$SAVEPART" "$SAVE_FS"
+   echo "PUP_SAVES=${PUP_SAVES}" #debug
+   if [ "$PUP_SAVES" ];then
+    NUMPUP_SAVES=0
+    for ONE_SAVE in $PUP_SAVES;do
+     NUMPUP_SAVES=$(expr $NUMPUP_SAVES + 1)
     done
-    if [ $NUMPUPSAVES -eq 1 ];then
-     PUPSAVE="$(echo -n $PUPSAVES)"
-    elif [ $NUMPUPSAVES -gt 1 ];then
+    echo "NUMPUP_SAVES=${NUMPUP_SAVES}" #debug
+    if [ $NUMPUP_SAVES -eq 1 ];then
+     PUPSAVE="$(echo -n $PUP_SAVES)"
+    elif [ $NUMPUP_SAVES -gt 1 ];then
      CNTSAVE=1
      echo -e "\\033[1;36m" >/dev/console #36=aquablue
      echo "${L_ERR_TYPE_PUPSAVE}" > /dev/console
      echo "${L_0_NONE}" > /dev/console
-     for ONETRY in $PUPSAVES;do
+     for ONETRY in $PUP_SAVES
+     do
       ONE_PART="$(echo -n "$ONETRY" | cut -f 1 -d ',')"
       ONE_FILE="$(echo -n "$ONETRY" | cut -f 3 -d ',')"
       echo -e "${CNTSAVE}  ${ONE_PART}\\033[10G${ONE_FILE}" > /dev/console #10 means move to that column.
@@ -1057,11 +1218,72 @@ if [ "$SAVE_MP" -a "$PRAMONLY" != "yes" ];then #have mounted save? partition
      done
      echo -en "\\033[0;39m" >/dev/console
      read NUMSAVE
-     [ $NUMSAVE -ne 0 ] && PUPSAVE="$(echo -n $PUPSAVES | cut -f $NUMSAVE -d ' ')"
+     #--  $NUMSAVE -ne 0 = have selected a PUPSAVE ...
+     if [ $NUMSAVE -ne 0 ] ; then
+      echo -e "\n----" #debug
+      echo "Have selected pupsave $NUMSAVE" #debug
+      PUPSAVE="$(echo -n $PUP_SAVES | cut -f $NUMSAVE -d ' ')"
+      PSPATH="${SAVE_MP}/$(echo "$PUPSAVE" | cut -f 3 -d ',')"
+      echo "PSPATH=${PSPATH}" #debug
+      case "$PSPATH" in *.tar.[gx]z) #compressed archive
+       PSPATH_NOTGZ=${PSPATH%.tar.[gx]z} #remove trailing 'tar.[gx]z'
+       echo "PSPATH_NOTGZ=${PSPATH_NOTGZ}" #debug
+       case "$PSPATH" in
+         *".2fs"*|*".3fs"*|*".4fs"*) savefile="yes" ;;
+         *) savefolder="yes" ;;
+       esac
+       case "$PSPATH" in
+         *.tar.gz) TAROPT="-z" ;;
+         *.tar.xz) TAROPT="-J" ;;
+       esac
+       echo "savefile=${savefile}"     #debug
+       echo "savefolder=${savefolder}" #debug
+       cdir=$(pwd)
+       #--
+       if [ "$savefolder" = "yes" ] ; then
+         mkdir -p "$PSPATH_NOTGZ"
+         cd "$PSPATH_NOTGZ"
+         echo "Extracting ${PSPATH##*/}..." >/dev/console #basename
+         tar -x $TAROPT -f "$PSPATH" && TAROK=yes
+         itsinside=$(ls -d ${DISTRO_FILE_PREFIX}save* | head -n 1)
+         if [ "$itsinside" ] ; then
+           cd "$cdir"
+           mv -fv "$PSPATH_NOTGZ" "$PSPATH_NOTGZ".2
+           sync
+           mv -fv "$PSPATH_NOTGZ".2/${itsinside} "$PSPATH_NOTGZ"
+           sync
+           rm -rfv "$PSPATH_NOTGZ".2
+         fi
+       else #savefile
+         cd "${PSPATH%/*}" #dirname $PSPATH
+         echo "Extracting ${PSPATH##*/}..." >/dev/console #basename $PSPATH
+         tar -x $TAROPT -f "$PSPATH" && TAROK=yes
+       fi
+       sync
+       #--
+       echo "TAROK=${TAROK}" #debug
+       if [ "$TAROK" = "yes" ] ; then
+         PUPSAVE=${PUPSAVE%.tar.[gx]z} #remove trailing 'tar.[gx]z'
+         rm -fv "$PSPATH"
+       else
+         PUPSAVE=""
+         echo "Error extracting ${PSPATH##*/}"
+         echo -e "\\033[1;31mError extracting ${PSPATH##*/}\\033[0;39m" >/dev/console #31=red
+         [ "$savefolder" = "yes" ] && rm -rf "$PSPATH_NOTGZ"
+         [ "$savefile" = "yes" ] && rm -fv "$PSPATH_NOTGZ"
+       fi
+       cd $cdir
+       echo -e "----\n" #debug
+       ;;
+      esac
+     fi
+     #----------------------------------------------------
     fi
    fi
   fi
+  echo "PUPSAVE=${PUPSAVE}" #debug
   if [ "$PUPSAVE" ];then
+   echo "Setting PUPMODE 12" #debug
    PUPMODE=12
    ONE_PART="$(echo -n "$PUPSAVE" | cut -f 1 -d ',')"
    [ "$ONE_PART" != "$SAVEPART" ] && { SAVEPART="$ONE_PART"; ensure_save_mounted; }
@@ -1071,21 +1293,36 @@ fi
 
 SAVE_LAYER=""
 if [ "$PUPSAVE" ];then #refine pupmode
+ # PMEDIA is the boot media (boot param)
+ # However the PUPSAVE (savefile, savefolder, savepartition)
+ #   might be located in another drive (ex: psave=sdb1:/customsavefile.4fs)
+ #   we must check if it's located in a flash media storage
+ #   in order to change the $SAVE_LAYER to /pup_ro1
+ PUPSAVE_DRV=$(echo $PUPSAVE | cut -f1 -d ',')
+ PUPSAVE_DRV=${PUPSAVE_DRV:0:3} #sda1 -> sda TODO: needs a proper fix
+ if probedisk ${PUPSAVE_DRV} | grep -q '|usbflash|' ; then
+   echo "*** Pupsave is located in a flash media storage: $PUPSAVE_DRV" #debug
+   PUPSAVE_MEDIA=usbflash
+ fi
+ # refine pupmode
  if [ $PUPMODE -eq 6 -o $PUPMODE -eq 12 ];then
-  if [ "${PMEDIA:3}" = "flash" ];then
+  SAVE_LAYER="/pup_rw"
+  if [ "${PMEDIA:3}" = "flash" -o "${PUPSAVE_MEDIA:3}" = "flash" ];then
    PUPMODE=$(expr $PUPMODE + 1) #PUPMODE=7 PUPMODE=13
+   echo "Setting PUPMODE $PUPMODE" #debug
    SAVE_LAYER="/pup_ro1"
-  else
-   SAVE_LAYER="/pup_rw"
   fi
+  echo "SAVE_LAYER=$SAVE_LAYER" #debug
+ elif [ $PUPMODE -eq 77 ];then
+  SAVE_LAYER="/pup_ro1"
  fi
 fi
 
 #load savefile if required, then setup stack
 case $PUPMODE in
  77) #load folders
-  copy_folders
-  prepend_dir
+  copy_folders #to /pup_ro1 (part of the tmpfs)
+  prepend_dir  #prepend ro1
  ;;
  13) #prepend ro1
   setup_save_file
@@ -1110,10 +1347,12 @@ esac
 
 umount_unneeded
 
+echo -n $TOTAL_SIZEK_SFS_RAM > /tmp/sfs_ram_sizek
+
 [ "$DEV1FS" ] || DEV1FS="$(echo "$PDRV" | cut -f 2 -d ',')"
 [ "$ATADRIVES" ] || ATADRIVES="$(cat /tmp/ATADRIVES0 | tr '\n' ' ')"
-mkdir -p /pup_new/etc/rc.d
 
+mkdir -p /pup_new/etc/rc.d
 ( # > /pup_new/etc/rc.d/PUPSTATE
 echo "PUPMODE=$PUPMODE"
 echo "PDEV1='$P_PART'"
@@ -1129,7 +1368,7 @@ echo '#these directories are unionfs/aufs layers in /initrd...'
 echo "SAVE_LAYER='$SAVE_LAYER'"
 echo "PUP_LAYER='$PUP_LAYER'"
 echo "#The partition that has the ${DISTRO_FILE_PREFIX}save file is mounted here..."
-echo "PUP_HOME='$SAVE_MP'"
+echo "PUP_HOME='${SAVE_MP}'"
 echo '#(in /initrd) ...note, /mnt/home is a link to it.'
 echo '#this file has extra kernel drivers and firmware...'
 echo "ZDRV='$ZDRV'"
@@ -1139,13 +1378,9 @@ echo "YDRV='$YDRV'"
 echo '#Partition no. override on boot drive to which session is (or will be) saved...'
 echo "PSAVEMARK='$PSAVEMARK'"
 echo "PSAVEPART='$PSAVEPART'"
+echo "PSAVEDIR='$SAVE_BP_DIR'"
 echo "PSUBDIR='$PSUBDIR'"
-if [ "$PLANG" ]; then #seems like a good thing!
- echo "#PLANG is written to LANG in /etc/profile by init script initrd...
-PLANG=${PLANG}
-OUTPUT_CHARSET=UTF-8
-export OUTPUT_CHARSET"
-fi
+[ -f /sbin/set_plang ] && plang_pupstate #echo
 [ "$UNDERDOG" ] && echo "UNDERDOG='$UNDERDOG'"
 ) > /pup_new/etc/rc.d/PUPSTATE
 
@@ -1160,52 +1395,87 @@ fi
 
 echo -n "${L_SWITCH_ROOT}" > /dev/console
 
+echo "Moving mountpoints to /pup_new/initrd for after switch..." #debug
 rm -r -f "/pup_new/initrd${SAVE_LAYER}"
 for ONEMNT in $(mount | cut -f 3 -d ' ' | grep -v 'pup_new' | grep '^/pup_' | tr '\n' ' ');do
  mkdir -p /pup_new/initrd${ONEMNT}
+ echo "mount -o move $ONEMNT /pup_new/initrd${ONEMNT}" #debug
  mount -o move $ONEMNT /pup_new/initrd${ONEMNT}
 done
 for ONEMNT in $(mount | cut -f 3 -d ' ' | grep '^/mnt/' | tr '\n' ' ');do
  mkdir -p /pup_new/initrd${ONEMNT}
+ echo "mount -o move $ONEMNT /pup_new/initrd${ONEMNT}" #debug
  mount -o move $ONEMNT /pup_new/initrd${ONEMNT}
 done
 
+echo -------------------- # debug
+mount
+echo -------------------- # debug
+
+echo "SAVE_FN=$SAVE_FN"         #debug
+echo "SAVE_LAYER=${SAVE_LAYER}" #debug
+
+
+# --- create/fix symlinks to /pup_new/initrd/* for after switch
+
+# remove symbolic links for after switch, that might be leftover
+[ -L /pup_new/initrd/pup_rw ] && rm -rf /pup_new/initrd/pup_rw
+[ -L /pup_new/initrd/pup_ro1 ] && rm -rf /pup_new/initrd/pup_ro1
+[ -L /pup_new/tmp ] && rm -fv /pup_new/tmp
+
+# SAVE_LAYER: /pup_rw or /pup_ro1
+# savefolder: create symlink to the save layer mountpoint in /pup_new/initrd
+# (for savefiles and savepartitions the SAVE_LAYER is not a symlink)
 if [ "$PUPSAVE" ];then
  if [ "$SAVE_LAYER" -a -L "$SAVE_LAYER" ];then
-  ln -s "/initrd${SAVE_FN}" "/pup_new/initrd${SAVE_LAYER}" #for after switch
+  ln -sv "/initrd${SAVE_FN}" "/pup_new/initrd${SAVE_LAYER}" #for after switch
  fi
 fi
-if [ -d "/pup_new/initrd/mnt/tmpfs/pup_rw" ];then
-  rm -r -f /pup_new/initrd/pup_rw
-  ln -s /initrd/mnt/tmpfs/pup_rw /pup_new/initrd/pup_rw #for after switch
+
+# symlinks to /pup_new/initrd/tmpfs subdirs
+# * /pup_rw:  pupmodes 5,7,13,77)
+# * /pup_ro1: in PUPMODE 77 pup_ro1 is part of the tmpfs but an aufs read-only branch
+#             where the previous session is stored to build the final filesystem
+# * (rm -rf ... is an extra measure to ensure deletion
+#     since an actual directory might be there and therefore was not deleted.)
+if [ -d /pup_new/initrd/mnt/tmpfs/pup_rw ] ; then
+ rm -rf /pup_new/initrd/pup_rw
+ ln -sv /initrd/mnt/tmpfs/pup_rw /pup_new/initrd/pup_rw #for after switch
+fi
+if [ -d /pup_new/initrd/mnt/tmpfs/pup_ro1 ] ; then
+ rm -rf /pup_new/initrd/pup_ro1
+ ln -sv /initrd/mnt/tmpfs/pup_ro1 /pup_new/initrd/pup_ro1 #for after switch
+fi
+mkdir -p /pup_new/initrd/mnt/tmpfs/tmp
+if [ -d /pup_new/initrd/mnt/tmpfs/tmp ];then #extra paranoid precaution
+ chmod 1777 /pup_new/initrd/mnt/tmpfs/tmp
+ rm -rf /pup_new/tmp
+ ln -sv /initrd/mnt/tmpfs/tmp /pup_new/tmp #for after switch
+fi
+
+#---
+
+# make sure /pup_new/sbin/mount.exfat is not missing...
+[ ! -f /pup_new/sbin/mount.exfat ] && cp -vu /bin/mount.exfat* /pup_new/sbin/
+
+# copy cryptsetup to /pup_new if it's missing
+if [ "$COPY_CRYPTSETUP" = "yes" ] ; then
+  [ ! -f /pup_new/bin/cryptsetup -a ! -f /pup_new/sbin/cryptsetup ] && \
+      cp -v /bin/cryptsetup /pup_new/sbin/
 fi
 
 #PNOX is a boot param. /etc/profile prevents X from starting if this file exists...
 [ "$PNOX" = "yes" ] && touch /pup_new/tmp/bootcnt.txt
 cp -a /DISTRO_SPECS /pup_new/initrd/
-cp /init /pup_new/initrd/
+cp /init* /pup_new/initrd/
 chmod -x /pup_new/initrd/init
 dmesg > /tmp/dmesg.txt
 
-[ -d "/pup_new/initrd/tmp" ] && rm -r -f /pup_new/initrd/tmp
+[ -d "/pup_new/initrd/tmp" ] && rm -rf /pup_new/initrd/tmp
 mkdir -p /pup_new/initrd/tmp
 cp -af /tmp/* /pup_new/initrd/tmp/ #keep any log files.
 
-[ -d "/pup_new/lib/consolefonts" ] || mkdir -p /pup_new/lib/consolefonts
-cp -a -n /lib/consolefonts/* /pup_new/lib/consolefonts/
-if [ "$KMAP" ];then #because PKEYS boot param was defined.
-  echo -n "$KMAP" > /pup_new/etc/keymap
-  echo -n "$FONTMAP" > /pup_new/etc/fontmap
-  echo -n "$CODEPAGE" > /pup_new/etc/codepage
-fi
-
-#120215 if PLANG set here, carry it over...
-[ "$PLANG" ] && sed -i "s%^LANG=.*%LANG=${PLANG}%" /pup_new/etc/profile
-
-if [ -d "/pup_new/initrd/mnt/tmpfs/tmp" -a -L /pup_new/tmp ];then
-  rm -f /pup_new/tmp
-  ln -s /initrd/mnt/tmpfs/tmp /pup_new/tmp #for after switch
-fi
+[ -f /sbin/set_plang ] && plang_copy_to_newroot #$LANG, /etc/keymap|fontmap|codepage
 
 if [ "$RDSH" = "yes" ];then
  echo > /dev/console

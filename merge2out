@@ -1,49 +1,25 @@
-#!/bin/sh
+#!/bin/bash
 #BK nov. 2011
-#111126 do not copy files from woof-distro to woof-out, symlink only.
-#111126 fix symlink to compat-distro pkg download directory.
-#111127 make sure host linux system has 'printcols' and 'vercmp' utilities.
-#111127 also make sure target build will have 'printcols' and 'vercmp'.
-#111203 fixes for rerun of this script.
-#120503 i left some EMPTYDIRMARKER files inside /dev.
-#120512 remove option to create symlinks in working directory.
-#120515 build from "gentoo" binary tarballs (refer support/gentoo).
-#130528 change owner:group of symlink instead of what it points to.
 
-[ ! -d ./woof-arch ] && exit
-[ ! -d ./woof-code ] && exit
-[ ! -d ./woof-distro ] && exit
-
-CURDIR="`pwd`"
-
+[ -d ./woof-arch ] || [ -d ./woof-code ] || [ -d ./woof-distro ] || exit
 echo
-echo 'This script merges woof-arch, woof-code and woof-distro, to ../woof-out_*.
-
-woof-arch:  architecture-dependent (x86, arm) files, mostly binary executables.
-woof-code:  the core of Woof. Mostly scripts.
-woof-distro: distro-configuration (Debian, Slackware, etc.) files.
-kernel-kit: puppy-kernel build script and configuration files
-initrd-progs: script to generate the initial ramdisk
-
-Important: the host architecture is distinct from the target architecture.
-The host is the machine you are running Woof on, the target is the machine
-in which the Puppy that you build is going to run. Typically, you will build
-on a x86 machine, and the target may be x86 or arm.'
-echo
+echo 'This script merges woof-arch, woof-code
+woof-distro, kernel-kit and initrd-progs to ../woof-out_*.
+See README
+'
 # autodetect HOSTARCH - how hard can it be?
-preHOSTARCH=`uname -m`
-case $preHOSTARCH in
+case `uname -m` in
 	i?86)HOSTARCH=x86 ;;
 	x86_64|amd64)HOSTARCH=x86_64 ;;
 	arm*)HOSTARCH=arm ;;
+	*) echo "Error detecting host architecture, exiting..." ; exit 1 ;;
 esac
-echo --------------------------------------------------------------------------
-echo -n "***     We have determined that your host architecture is $HOSTARCH"
-echo '    ***'
-echo --------------------------------------------------------------------------
+echo "-----------------"
+echo "Host arch: $HOSTARCH     (The host is the machine you are running Woof on)"
+echo "-----------------"
 echo
-
-echo "Please choose the target target architecture.."
+echo "Please choose the target target architecture.. (the target 
+is the machine in which the Puppy that you build is going to run):"
 while [ "$TARGETARCH" = "" ] ; do
 	echo
 	CNT=1
@@ -77,10 +53,8 @@ done
 echo "...ok, $COMPATDISTRO"
 echo
 
-echo 'The compat-distro usually has release versions, unless it is a rolling
-release system such as Arch Linux. Please choose which release you want to
-obtain the binary packages from.'
-
+echo 'The compat-distro usually has release versions
+Choose which release you want to obtain the binary packages from.'
 while [ "$COMPATVERSION" = "" ] ; do
 	echo
 	CNT=1
@@ -90,9 +64,7 @@ while [ "$COMPATVERSION" = "" ] ; do
 		CNT=$(($CNT + 1))
 	done
 	if [ $CNT -eq 1 ];then
-		echo
-		echo "Sorry, there are no release directories inside woof-distro/${COMPATDISTRO}."
-		echo "At least one is required. Quiting."
+		echo -e "\nSorry, there are no release directories inside woof-distro/${COMPATDISTRO}."
 		exit
 	fi
 	echo -n 'Type number of release: '
@@ -124,17 +96,16 @@ woof-arch/${TARGETARCH}/target
 woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION} (files all levels)"
 echo
 echo "Any existing files in '${WOOF_OUT}' will be over-ridden."
-echo "(Also, if you have any of your own files in folders 'boot', 'kernel-skeleton',
- 'packages-templates', 'rootfs-skeleton', 'rootfs-packages', 'support', 'kernel-kit'
- or 'initrd-progs', they will be deleted.)"
+echo "(Also, all files in folders 'boot', 'kernel-skeleton',
+ 'packages-templates', 'rootfs-skeleton', 'rootfs-packages', 'support',
+ 'kernel-kit' and 'initrd-progs' will be deleted.)"
 echo
 echo -n 'Press ENTER to continue: '
 read goforit
 
-#111203 as files/dirs could be removed in future woofs, need to wipe entire target dirs first...
+# as files/dirs could be removed in future woofs, need to wipe entire target dirs first...
 for d in boot kernel-skeleton packages-templates rootfs-skeleton rootfs-packages support kernel-kit initrd-progs
-do
-	rm -rf ${WOOF_OUT}/${d} 2> /dev/null
+do rm -rf ${WOOF_OUT}/${d} 2> /dev/null
 done
 sync
 
@@ -166,64 +137,71 @@ if [ "${COMPATDISTRO}" = "slackware64" -a "${TARGETARCH}" = "x86_64" ];then
 	done
 	#fix FIXUPHACK scripts
 	find ${TEMPLATES} -type f -name FIXUPHACK -exec sed -i -e 's%lib\/%lib64/%g' -e 's%lib %lib64 %g' '{}' \;
+	# restore dbus_slack; needs /var/lib not /var/lib64
+	sed -i 's%lib64\/%lib/%g' ${TEMPLATES}/dbus_slack/FIXUPHACK
 	echo -e "\n\nlib64 directories created in packages-templates."
 fi
-echo
-echo "Copying kernel-kit..."
+echo "Copying kernel-kit, initrd-progs..."
 cp -a -f --remove-destination kernel-kit ${WOOF_OUT}/
-sync
-echo "Copying initrd-progs..."
 cp -a -f --remove-destination initrd-progs ${WOOF_OUT}/
 sync
-
-echo
 echo "Copying woof-distro/${COMPATDISTRO}/${COMPATVERSION}/*..."
 #copy any top-level files, going down...
-
-DESTTYPE='file'
-choosesymlink=''
-
-PARENTDIR="`echo -n "$CURDIR" | rev | cut -f 1 -d '/' | rev`" #ex: woof2
-for ONETOP in `find woof-distro -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '`
+for ONETOP in \
+`find woof-distro -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '` \
+`find woof-distro/${TARGETARCH} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '` \
+`find woof-distro/${TARGETARCH}/${COMPATDISTRO} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '` \
+`find woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '`
 do
-	if [ "$choosesymlink" = "" ];then
-		cp -a -f --remove-destination $ONETOP ${WOOF_OUT}/
-	else
-		ONENAME="`basename $ONETOP`"
-		ln -snf ../${PARENTDIR}/${ONETOP} ${WOOF_OUT}/${ONENAME}
-	fi
+	cp -a -f --remove-destination $ONETOP ${WOOF_OUT}/
 done
 
-for ONETOP in `find woof-distro/${TARGETARCH} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '`
-do
-	if [ "$choosesymlink" = "" ];then
-		cp -f -a --remove-destination $ONETOP ${WOOF_OUT}/
-	else
-		ONENAME="`basename $ONETOP`"
-		ln -snf ../${PARENTDIR}/${ONETOP} ${WOOF_OUT}/${ONENAME}
+if [ -d "woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/packages-templates" ];then
+	echo "Copying woof-distro/${COMPATDISTRO}/${COMPATVERSION}/packages-templates..."
+	for ONEDIRECTORY in \
+	`find woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/packages-templates -mindepth 1 -maxdepth 1 -type d | tr '\n' ' '`
+	do
+		TEMPLATEDIR=`expr "$ONEDIRECTORY" : "woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/packages-templates/\(.*\)"`
+		echo "    $TEMPLATEDIR"
+		if [ -n "$TEMPLATEDIR" -a -d "${WOOF_OUT}/packages-templates/${TEMPLATEDIR}" ];then
+			rm -r ${WOOF_OUT}/packages-templates/${TEMPLATEDIR}
+		fi
+		cp -a ${ONEDIRECTORY} ${WOOF_OUT}/packages-templates/
+	done
+fi
+if [ -d "woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-packages" ];then
+	echo "Copying woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-packages..."
+	for ONEDIRECTORY in \
+	`find woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-packages -mindepth 1 -maxdepth 1 -type d | tr '\n' ' '`
+	do
+		PACKAGEDIR=`expr "$ONEDIRECTORY" : "woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-packages/\(.*\)"`
+		echo "    $PACKAGEDIR"
+		if [ -n "$PACKAGEDIR" -a -d "${WOOF_OUT}/rootfs-packages/${PACKAGEDIR}" ];then
+			rm -r ${WOOF_OUT}/rootfs-packages/${PACKAGEDIR}
+		fi
+		cp -a ${ONEDIRECTORY} ${WOOF_OUT}/rootfs-packages/
+	done
+fi
+if [ -d "woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-skeleton" ];then
+	echo "Copying woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-skeleton..."
+	SKELETONFILES=`find woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-skeleton/ -type f -printf '    %f\n'`
+	if [ -n "$SKELETONFILES" ];then
+		echo "$SKELETONFILES"
+		cp -a -f --remove-destination woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/rootfs-skeleton/* ${WOOF_OUT}/rootfs-skeleton/
 	fi
-done
+fi
+if [ -d "woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/patches" ];then
+	echo "Applying patches from woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/patches..."
+	for PATCHFILE in \
+	`find woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION}/patches -mindepth 1 -maxdepth 1 -type f -iname '*.patch' | tr '\n' ' '`
+	do
+		echo "    $PATCHFILE"
+		patch --unified --forward --silent -p 3 --input="../woof-CE/$PATCHFILE" --directory=${WOOF_OUT}
+	done
+fi
 
-for ONETOP in `find woof-distro/${TARGETARCH}/${COMPATDISTRO} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '`
-do
-	if [ "$choosesymlink" = "" ];then
-		cp -f -a --remove-destination $ONETOP ${WOOF_OUT}/
-	else
-		ONENAME="`basename $ONETOP`"
-		ln -snf ../${PARENTDIR}/${ONETOP} ${WOOF_OUT}/${ONENAME}
-	fi
-done
-
-#lowest level...
-for ONETOP in `find woof-distro/${TARGETARCH}/${COMPATDISTRO}/${COMPATVERSION} -mindepth 1 -maxdepth 1 -type f | tr '\n' ' '`
-do
-	if [ "$choosesymlink" = "" ];then
-		cp -f -a --remove-destination $ONETOP ${WOOF_OUT}/
-	else
-		ONENAME="`basename $ONETOP`"
-		ln -snf ../${PARENTDIR}/${ONETOP} ${WOOF_OUT}/${ONENAME}
-	fi
-done
+rm -f ${WOOF_OUT}/c_apps
+cp -a README ${WOOF_OUT}/README.TXT
 sync
 
 echo "WOOF_HOSTARCH='$HOSTARCH'
@@ -231,104 +209,60 @@ WOOF_TARGETARCH='${TARGETARCH}'
 WOOF_COMPATDISTRO='${COMPATDISTRO}'
 WOOF_COMPATVERSION='${COMPATVERSION}'" > ${WOOF_OUT}/WOOFMERGEVARS
 
-#work around limitations of a version control system...
-echo
-echo "Some things are modified inside 'woof-code' to cater for most Version
-Control Systems.. this will now be undone in '../woof-out_*'..."
-echo
-echo -n "Press ENTER to continue: "
-read goforit
+# new to avoid checkbox GUI; idea from peebee. See 3builddistro-Z
+(cd ${WOOF_OUT}
+rm -f support/rootfs-packages.conf-backup 2>/dev/null
+ls rootfs-packages|while read pkg;do
+	echo -e "$pkg=\"true\"" >> support/rootfs-packages.conf-backup
+done)
 
-echo
-cd ${WOOF_OUT}
+echo -e "\nUndoing VCS-friendly stuff..."
 (
-	cd rootfs-skeleton
-	[ -f dev.tar.gz ] && tar -zxf dev.tar.gz && rm -f dev.tar.gz
-)
+cd ${WOOF_OUT}
 find . -type f -name EMPTYDIRMARKER -delete
-
-#2: VCSMETADATA permissions/ownership...
-if [ -s VCSMETADATA ];then
-	echo "Fixing file/dir permissions/ownership..."
+if [ -s VCSMETADATA ];then #permissions/ownership...
+	echo -n "Fixing file/dir permissions/ownership..."
+	grep -q '^spot:' /etc/passwd || sed -i '/:spot:/d' VCSMETADATA
 	while read ONESPEC ; do
 		IFS=":" read -r ONEFILE ONEPERM ONEOWNER ONEGROUP <<< "$ONESPEC"
 		[ ! -e "$ONEFILE" ] && continue
-		echo -n '.'
 		chmod $ONEPERM $ONEFILE
-		#130528 change owner:group of symlink instead of what it points to...
+		# change owner:group of symlink instead of what it points to...
 		[ "$ONEOWNER" != "UNKNOWN" ] && chown -h $ONEOWNER $ONEFILE
 		[ "$ONEOWNER" = "UNKNOWN" ] && chown -h root $ONEFILE
 		[ "$ONEGROUP" != "UNKNOWN" ] && chgrp -h $ONEGROUP $ONEFILE
 		[ "$ONEGROUP" = "UNKNOWN" ] && chgrp -h root $ONEFILE
 	done < VCSMETADATA
-	echo
 fi
-cd $CURDIR
-sync
-
-#common dir to download pet pkgs to...
-mkdir -p ../local-repositories/${TARGETARCH}/packages-pet
-[ ! -e ${WOOF_OUT}/packages-pet ] && ln -s ../local-repositories/${TARGETARCH}/packages-pet ${WOOF_OUT}/packages-pet #111203 check exist.
-
-#more links to common download...
-if [ -f ${WOOF_OUT}/DISTRO_SPECS ];then
-	. ${WOOF_OUT}/DISTRO_SPECS
-	#111126 code from 2createpackages...
-	BINARIES='deb' #get them from packages-deb.
-	[ "$DISTRO_BINARY_COMPAT" = "slackware" ] && BINARIES="tgz_txz" #download to packages-tgz_txz-${DISTRO_COMPAT_VERSION}.
-	[ "$DISTRO_BINARY_COMPAT" = "slackware64" ] && BINARIES="tgz_txz" #download to packages-tgz_txz-${DISTRO_COMPAT_VERSION}. #140619 add 64
-	[ "$DISTRO_BINARY_COMPAT" = "debian" ] && BINARIES="deb" #download to packages-deb-${DISTRO_COMPAT_VERSION}.
-	[ "$DISTRO_BINARY_COMPAT" = "gentoo" ] && BINARIES="gentoo" #120515 download to packages-gentoo-gap6
-	[ "$DISTRO_BINARY_COMPAT" = "raspbian" ] && BINARIES="deb_raspbian" #download to packages-deb_raspbian-${DISTRO_COMPAT_VERSION}.
-	BINARIES="${BINARIES}-${DISTRO_COMPAT_VERSION}"
-
-	mkdir -p ../local-repositories/${TARGETARCH}/packages-${BINARIES}
-	[ ! -e ${WOOF_OUT}/packages-${BINARIES} ] && ln -s ../local-repositories/${TARGETARCH}/packages-${BINARIES} ${WOOF_OUT}/packages-${BINARIES} #111203 check exist.
-	if [ "$DISTRO_TARGETARCH" = "arm" ]; then
-		mkdir -p ../local-repositories/${TARGETARCH}/sd-skeleton-images
-		[ ! -e ${WOOF_OUT}/sd-skeleton-images ] && ln -s ../local-repositories/${TARGETARCH}/sd-skeleton-images ${WOOF_OUT}/sd-skeleton-images
-	fi
-fi
+rm -f VCSMETADATA
+. ./_00func
+create_local_repos_dirs
+)
 
 #record target architecture in DISTRO_SPECS (will end up in /etc/ in Puppy build)...
-if [ -f ${WOOF_OUT}/DISTRO_SPECS ];then
-	if [ "`grep '^DISTRO_TARGETARCH' ${WOOF_OUT}/DISTRO_SPECS`" = "" ];then
-		echo "DISTRO_TARGETARCH='${TARGETARCH}'" >> ${WOOF_OUT}/DISTRO_SPECS
-	fi
-fi
+sed -i '/DISTRO_TARGETARCH=/d' ${WOOF_OUT}/DISTRO_SPECS
+echo "DISTRO_TARGETARCH='${TARGETARCH}'" >> ${WOOF_OUT}/DISTRO_SPECS
 
 #record the woof state we build from
 if [ "`git log -n 1`" != "" ]; then
 	GITBRANCH=$(git rev-parse --abbrev-ref HEAD)
 	GITHEAD=$(git log -n 1 --pretty=format:"%h;%ci") # git rev-parse HEAD
-	if [ -f ${WOOF_OUT}/DISTRO_SPECS ];then
-		if [ "`grep '^BUILD_FROM_WOOF' ${WOOF_OUT}/DISTRO_SPECS`" = "" ];then
-			echo "BUILD_FROM_WOOF='${GITBRANCH};${GITHEAD}'" >> ${WOOF_OUT}/DISTRO_SPECS
-		fi
-	fi
+	sed -i '/BUILD_FROM_WOOF=/d' ${WOOF_OUT}/DISTRO_SPECS
+	echo "BUILD_FROM_WOOF='${GITBRANCH};${GITHEAD}'" >> ${WOOF_OUT}/DISTRO_SPECS
 fi
 
-#until i upgrade the woof scripts... (i was planning to rename Packages-puppy-* to Packages-pet-*, aborted)
-for ONEPP in `find ${WOOF_OUT} -mindepth 1 -maxdepth 1 -name 'Packages-pet-*' | tr '\n' ' '`
-do
-	BASEPP="`basename $ONEPP`"
-	NEWBASE="`echo -n $BASEPP | sed -e 's%Packages-pet-%Packages-puppy-%'`"
-	ln -s $BASEPP ${WOOF_OUT}/${NEWBASE}
-done
-
-#111127 make sure host puppy has these...
+# make sure host puppy has these...
 [ ! -f /usr/sbin/printcols ] && cp -af woof-arch/${HOSTARCH}/build/support/printcols /usr/sbin/ #column manipulator.
 
-#111127 make sure target has these...
+# make sure target has these...
+cp -af woof-arch/${TARGETARCH}/build/support/debdb2pupdb ${WOOF_OUT}/${NEWBASE}/rootfs-skeleton/usr/local/petget/
+cp -af woof-arch/${TARGETARCH}/build/support/find_cat ${WOOF_OUT}/${NEWBASE}/rootfs-skeleton/usr/local/petget/
 cp -af woof-arch/${TARGETARCH}/build/support/printcols ${WOOF_OUT}/${NEWBASE}/rootfs-skeleton/usr/sbin/
-
-rm -f ${WOOF_OUT}/c_apps
 
 echo
 echo "Directory '${WOOF_OUT}'
-is now normal, that is, the workarounds have been removed. Note,
-../local-repositories has been created (if not already), to be used as a common
-binary package download place. 'packages-pet' and 'packages-${BINARIES}'
-have been created that link into it, where pkgs will be downloaded to."
+is now normal (the workarounds have been removed). Note,
+../local-repositories has been created (if not already),
+to be used as a common binary package download place."
 
 ### END ###

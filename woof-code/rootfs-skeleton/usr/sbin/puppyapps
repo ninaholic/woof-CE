@@ -6,10 +6,13 @@ set -a #export all functions and variables
 export TEXTDOMAIN=puppyapps
 export OUTPUT_CHARSET=UTF-8
 DEFAULTAPPS=""
-default_apps='archiver audioeditor audiomixer audioplayer barehtmlviewer browser calendar cdplayer cdrecorder chat chmviewer connect contact draw email filemanager htmleditor htmlviewer imageeditor imageviewer mediaplayer musicplayer paint pdfviewer processmanager screenshot run search spreadsheet terminal texteditor textviewer wordprocessor'
+default_apps='archiver audioeditor audiomixer audioplayer barehtmlviewer browser calendar cdplayer cdrecorder chat chmviewer connect contact draw email htmleditor htmlviewer imageeditor imageviewer mediaplayer musicplayer paint pdfviewer processmanager screenshot run search spreadsheet terminal texteditor textviewer wordprocessor'
 IGNORE_ALREADY_SET=""
 APPS_DEFAULT_EXEC="$(gettext 'Autodetect')"
-[ ! -d /tmp/puppyapps ] && mkdir -p /tmp/puppyapps
+if [ ! -d /tmp/puppyapps ] ; then
+	SHOW_SPLASH=1
+	mkdir -p /tmp/puppyapps
+fi
 GUI_SORT=2
 GUI_MAXROWS=10
 GUI_COUNT=0 #count available default* - for columns in gui
@@ -135,10 +138,6 @@ apps_array() {
 		APPLIST="`echo -e "thunderbird\nsylpheed\n"`
 		$(remove_desktop 'libfm' | search_desktop2 'mail')"
 		;;
-	filemanager)
-		APPLIST="`echo -e "spacefm\npcmanfm\nthunar\nrox\n"`
-		$(search_desktop 'file.*manager')"
-		;;
 	htmleditor)
 		APPLIST="`echo -e "libreoffice5.0 --web\nbluefish\ngeany\n"`
 		$(search_desktop '(html|web|text).*editor')"
@@ -229,7 +228,7 @@ apps_array() {
 update_defaults () {
 	LANG=C
 	# change the default*** files, using the 'change_default' util
-	for I in $DEFAULTAPPS ; do
+	for I in $appz ; do
 	  case ${I#default} in
 		archiver)      change_default 'archiver' "$ARCHIVER" ;;
 		audioeditor)   change_default 'audioeditor' "$AUDIOEDITOR" ;;
@@ -246,7 +245,6 @@ update_defaults () {
 		contact)       change_default 'contact' "$CONTACT" ;;
 		draw)          change_default 'draw' "$DRAW" ;;
 		email)         change_default 'email' "$EMAIL" ;;
-		filemanager)   change_default 'filemanager' "$FILEMANAGER" ;;
 		htmleditor)    change_default 'htmleditor' "$HTMLEDITOR" ;;
 		htmlviewer)    change_default 'htmlviewer' "$HTMLVIEWER" ;;
 		imageeditor)   change_default 'imageeditor' "$IMAGEEDITOR" ;;
@@ -282,20 +280,8 @@ change_default () {
 		echo "'default$TYPE' cannot set to itself."
 	elif [ -f "/usr/local/bin/default$TYPE" ];then
 		#replace the old program with the new one
-		if [ -f "$FILE" ]; then #path included
+		if [ "$FILE" ]; then
 			echo -e "#!/bin/sh\nexec $FILE \"\$@\"" > "/usr/local/bin/default$TYPE" #add new comand
-			echo "Default $TYPE changed to $FILE"
-		elif [ "$FILE" ]; then
-			if [ "`which $FILE`" ]; then
-				echo -e "#!/bin/sh\nexec $FILE \"\$@\"" > "/usr/local/bin/default$TYPE" #add new comand
-				echo "Default $TYPE changed to $FILE"
-			else
-				echo -e "#!/bin/sh\nexec puppyapps default$TYPE \"@\"" > "/usr/local/bin/default$TYPE"
-				echo "$FILE is not installed on the system. Default $TYPE will be autodetected by Puppy"
-			fi
-		else
-			echo -e "#!/bin/sh\nexec puppyapps default$TYPE \"@\"" > "/usr/local/bin/default$TYPE"
-			echo "EXEC not set. Default $TYPE will be autodetected by Puppy"
 		fi
 	else #the default* file given was not found
 		echo "The file '/usr/local/bin/default$TYPE' not found."
@@ -688,7 +674,7 @@ for arg in "$@" ; do
   
 supported TYPEs:
 ----------------'
-default_apps | tr ' ' '\n'
+echo ${default_apps} | tr ' ' '\n'
 
 			exit
 			;;
@@ -754,7 +740,7 @@ if [ ! "$DEFAULTAPPS" ]; then
 		;;
 	System)
 		GUI_MAXROWS=6
-		DEFAULTAPPS='defaultcalendar defaultcontact defaultscreenshot defaultfilemanager defaultarchiver defaultsearch defaultterminal defaultprocessmanager defaultrun defaultbrowser defaultemail defaultconnect defaultchat'
+		DEFAULTAPPS='defaultcalendar defaultcontact defaultscreenshot defaultarchiver defaultsearch defaultterminal defaultprocessmanager defaultrun defaultbrowser defaultemail defaultconnect defaultchat'
 		;;
 	All)
 		XWININFO=$(xwininfo -root)
@@ -780,7 +766,7 @@ fi
 desktop_output
 
 #splash
-if [ ! "$DEFAULTAPPS" ]; then
+if [ ! "$DEFAULTAPPS" -o "$SHOW_SPLASH" != "" ]; then
 	/usr/lib/gtkdialog/box_splash -close never -fontsize large -text " $(gettext 'Default Applications Chooser...')" &
 	XPID=$!
 fi
@@ -834,9 +820,9 @@ make_box() {
 	    <vbox space-expand="true" space-fill="true">
 	      <text xalign="0" space-expand="true" space-fill="true"><label>"'$LABEL'"</label></text>
 	      <comboboxentry space-expand="false" space-fill="false" tooltip-text="'$(gettext 'Choose your preferred default program, or type command.')'">
-		    <variable>'$VARIABLE'</variable>
-		    <default>'$DEFAULT_EXEC'</default>
-		    <input file>/tmp/puppyapps/puppyapps_items_'$APP'</input>
+	        <variable>'$VARIABLE'</variable>
+	        <default>'$DEFAULT_EXEC'</default>
+	        <input file>/tmp/puppyapps/puppyapps_items_'$APP'</input>
 	      </comboboxentry>
 	    </vbox>
 	  </hbox>
@@ -871,7 +857,6 @@ DRAW draw_vector.svg $(gettext 'Draw')
 IMAGEEDITOR edit_image.svg $(gettext 'Image editor')
 IMAGEVIEWER image_viewer.svg $(gettext 'Image viewer')
 SCREENSHOT photocamera.svg $(gettext 'Screenshot')
-FILEMANAGER directory.svg $(gettext 'File manager')
 ARCHIVER package_compressed.svg $(gettext 'Archiver')
 SEARCH find.svg $(gettext 'Search')
 TERMINAL terminal.svg $(gettext 'Terminal')
@@ -900,7 +885,7 @@ done <<< "$APPDATA2" > /tmp/puppyapps/gui_boxes #(*)
 gettext "<b>Helpful Tips</b>
 You can add custom commands, parameters and options by typing the desired command in the chosen field and clicking the apply button. To load apps through the terminal, simply add 'rxvt -e ' before the command you wish to execute in the terminal.
 
-Example: 'rxvt -e mp' will load the terminal based editor, called MP." > /tmp/puppyapps/box_help
+Example: 'rxvt -e mp' will load the terminal based editor, called MP." > /tmp/box_help
 
 export GUI='
 <window title="'$(gettext 'Default Applications Chooser')'" default-height="480" image-name="'${DC_ICON}'">
