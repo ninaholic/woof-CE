@@ -5,7 +5,7 @@ xargs sed -i -e 's, %.$,,g' \
              -e 's/^Icon.*/Icon=seamonkey.svg/'
 
 SM=`find usr/lib -maxdepth 1 -type d -name 'seamonkey*'`
-mkdir -p ${SM}/defaults/pref
+mkdir -p  /defaults/pref
 PREFDIR="${SM}/defaults/pref"
 
 cat > ${PREFDIR}/local-settings.js <<_EOF
@@ -14,7 +14,7 @@ cat > ${PREFDIR}/local-settings.js <<_EOF
 pref("browser.startup.homepage", "data:text/plain,browser.startup.homepage=file:///usr/share/doc/home.htm");
 _EOF
 
-(cd usr/lib/seamonkey*
+(cd ${SM}
 [ -f omni.ja ] && mkdir omnidir
 mv omni.ja omnidir/omni.zip
 cd omnidir
