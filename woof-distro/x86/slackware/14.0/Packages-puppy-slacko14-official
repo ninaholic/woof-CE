@@ -251,6 +251,7 @@ sdl-1.2.15-i486|sdl|1.2.15-i486||BuildingBlock|1008K||sdl-1.2.15-i486.pet||sdl l
 sdl_DEV-1.2.15-i486|sdl_DEV|1.2.15-i486||BuildingBlock|740K||sdl_DEV-1.2.15-i486.pet||sdl headers|slackware|14.0||
 sdl_DOC-1.2.15-i486|sdl_DOC|1.2.15-i486||BuildingBlock|2144K||sdl_DOC-1.2.15-i486.pet||sdl docs||||
 sfontview-0.1.1-i468-s|sfontview|0.1.1-i468-s||Desktop|44K||sfontview-0.1.1-i468-s.pet||font viewer|slackware|14.0||
+sfs_manager-0.8|sfs_manager|0.8||Setup|52K||sfs_manager-0.8.pet||Sfs Manager download and install sfs files||||
 ShallowThought_gtk-0.2|ShallowThought_gtk|0.2|||220K||ShallowThought_gtk-0.2.pet||no description provided||||
 slang-2.2.4-i686|slang|2.2.4-i686||BuildingBlock|2844K||slang-2.2.4-i686.pet||slang library|slackware|14.0||
 slang_DEV-2.2.4-i686|slang_DEV|2.2.4-i686||BuildingBlock|104K||slang_DEV-2.2.4-i686.pet||slang headers||||
