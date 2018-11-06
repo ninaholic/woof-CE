@@ -306,7 +306,7 @@ yes|mhwaveedit||exe,nls
 yes|mingetty||exe,dev,doc,nls
 yes|mirdir||exe
 yes|modem_stats||exe
-yes|mozilla-firefox|mozilla-firefox|exe,dev>null,doc>null| #must keep maintained if used
+no|mozilla-firefox|mozilla-firefox|exe,dev>null,doc>null| #must keep maintained if used
 yes|mp||exe,dev>null,doc,nls
 yes|mpfr|mpfr|exe>dev,dev,doc,nls
 yes|MPlayer||exe
@@ -318,7 +318,7 @@ yes|mtr|mtr|exe
 yes|nasm|nasm|exe>dev,dev,doc,nls
 yes|nbtscan||exe
 yes|ncurses|ncurses|exe,dev,doc,nls
-yes|ndiswrapper||exe,dev>null,doc,nls
+no|ndiswrapper||exe,dev>null,doc,nls
 yes|nenscript||exe
 yes|neon|neon|exe>dev,dev,doc,nls
 yes|netpbm||exe,dev,doc,nls
@@ -495,6 +495,6 @@ yes|YASSM||exe
 yes|z2_walls||exe
 yes|zip|infozip|exe,dev>null,doc,nls
 yes|zlib|zlib|exe,dev,doc,nls
-yes|z_fixcache||exe| #workaround for mozilla cache bug
+no|z_fixcache||exe| #workaround for mozilla cache bug
 yes|z_spup_cups_authentication_fix||exe
 '
