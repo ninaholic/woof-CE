@@ -1,0 +1,1 @@
+file-5.11|file|5.11|1|BuildingBlock|980K|slackware/a|file-5.11-i486-1.txz|+zlib|a utility to determine file type|slackware|14.0||
