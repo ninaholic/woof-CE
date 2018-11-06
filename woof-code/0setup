@@ -534,6 +534,9 @@ elif [ "$RUNNINGPUP" = "yes" ];then
  exit
 fi
 
+rm Packages-puppy-noarch-official
+cp Packages-puppy-noarch-official-real Packages-puppy-noarch-official
+
 echo "`date +%Y%m%d `" > /root/.packages/db-date
 check_compat_distro_pkgs
 
